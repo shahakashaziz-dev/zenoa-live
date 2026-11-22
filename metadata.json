@@ -1,0 +1,6 @@
+{
+  "name": "Zenoa",
+  "description": "Your Free AI Friend in Every Language — 100% private, browser-based multilingual AI companion & study buddy PWA.",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
