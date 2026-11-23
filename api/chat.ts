@@ -1,60 +1,58 @@
 import type { IncomingMessage, ServerResponse } from 'http';
-import { processGeminiChat, type ChatRequestBody } from '../server/geminiChat';
+import { GoogleGenAI } from '@google/genai';
 
-const MAX_BODY_BYTES = 12 * 1024 * 1024;
-
-async function readJsonBody(req: IncomingMessage & { body?: unknown }): Promise<ChatRequestBody> {
-  if (req.body && typeof req.body === 'object') {
-    return req.body as ChatRequestBody;
-  }
-  if (typeof req.body === 'string') {
-    return (JSON.parse(req.body) ?? {}) as ChatRequestBody;
-  }
-
-  const chunks: Buffer[] = [];
-  let total = 0;
-
-  for await (const chunk of req) {
-    const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-    total += buf.length;
-    if (total > MAX_BODY_BYTES) {
-      throw new Error('Request payload too large');
-    }
-    chunks.push(buf);
-  }
-
-  const raw = Buffer.concat(chunks).toString('utf8').trim();
-  if (!raw) return {};
-  return (JSON.parse(raw) ?? {}) as ChatRequestBody;
-}
-
-function sendJson(res: ServerResponse, statusCode: number, payload: unknown): void {
-  res.statusCode = statusCode;
+export default async function handler(req: IncomingMessage & { body?: any }, res: ServerResponse) {
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
-  res.end(JSON.stringify(payload));
-}
-
-export default async function handler(
-  req: IncomingMessage & { body?: unknown },
-  res: ServerResponse,
-): Promise<void> {
   if (req.method === 'OPTIONS') {
     res.statusCode = 204;
     res.end();
     return;
   }
 
-  if (req.method !== 'POST') {
-    sendJson(res, 405, { ok: false, errorCode: 'METHOD_NOT_ALLOWED', message: 'Use POST.' });
-    return;
-  }
-
   try {
-    const body = await readJsonBody(req);
-    const result = await processGeminiChat(body);
-    sendJson(res, result.status, result.body);
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : 'Invalid request body';
-    sendJson(res, 400, { ok: false, errorCode: 'BAD_REQUEST', message: msg });
+    const chunks: Buffer[] = [];
+    for await (const chunk of req) {
+      chunks.push(typeof chunk === 'string' ? Buffer.from(chunk) : chunk);
+    }
+    const raw = Buffer.concat(chunks).toString('utf8').trim();
+    const body = raw ? JSON.parse(raw) : (req.body || {});
+    const userMessage = String(body.userMessage || '').trim();
+
+    if (!userMessage && !body.imageDataUrl) {
+      res.statusCode = 400;
+      res.end(JSON.stringify({ ok: false, errorCode: 'EMPTY_INPUT', message: 'Message required' }));
+      return;
+    }
+
+    const apiKey = (process.env.GEMINI_API_KEY || '').trim();
+    if (!apiKey) {
+      res.statusCode = 500;
+      res.end(JSON.stringify({ ok: false, errorCode: 'MISSING_KEY', message: 'API Key missing' }));
+      return;
+    }
+
+    const ai = new GoogleGenAI({ apiKey });
+    const parts: any[] = [];
+    if (body.imageDataUrl) {
+      const m = String(body.imageDataUrl).match(/^data:(image\/[^;]+);base64,(.+)$/);
+      if (m) parts.push({ inlineData: { mimeType: m[1], data: m[2] } });
+    }
+    if (userMessage) parts.push({ text: userMessage });
+
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: [{ role: 'user', parts }],
+      config: {
+        systemInstruction: 'You are Zenoa, a helpful, smart AI assistant created by a Class 9 student from West Bengal, India. Answer accurately in the user language (Bengali, Banglish, or English). Use Google Search for live facts.',
+        tools: [{ googleSearch: {} }],
+      },
+    });
+
+    const reply = response.text?.trim() || 'Sorry, no response generated.';
+    res.statusCode = 200;
+    res.end(JSON.stringify({ ok: true, reply }));
+  } catch (err: any) {
+    res.statusCode = 502;
+    res.end(JSON.stringify({ ok: false, errorCode: 'GEMINI_ERROR', message: String(err?.message || err) }));
   }
 }
