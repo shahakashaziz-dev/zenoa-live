@@ -44,7 +44,14 @@ export default async function handler(req: IncomingMessage & { body?: any }, res
       try {
         const response = await ai.models.generateContent({
           model: modelName,
-          contents: [{ role: 'user', parts }],
+        contents: [
+  ...(Array.isArray(body.history) ? body.history.slice(-6).map((h: any) => ({
+    role: h.role === 'model' ? 'model' : 'user',
+    parts: [{ text: String(h.text || '') }]
+  })) : []),
+  { role: 'user', parts }
+]
+
           config: {
             systemInstruction: 'You are Zenoa, a helpful AI assistant created by a Class 9 student from West Bengal, India. Answer accurately in the user language (Bengali, Banglish, or English).',
           },
