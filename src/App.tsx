@@ -465,9 +465,7 @@ export default function App() {
         if (!replyText) {
 
      replyText = 'Server is busy — please wait 3 seconds and send your message again!';
-   }
-  }
-      }
+        }
 
       const elapsed = Math.max(1, Math.round(performance.now() - startedAt));
       const replyMsg: ChatMessage = {
