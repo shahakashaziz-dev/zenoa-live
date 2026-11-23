@@ -47,7 +47,6 @@ export default async function handler(req: IncomingMessage & { body?: any }, res
           contents: [{ role: 'user', parts }],
           config: {
             systemInstruction: 'You are Zenoa, a helpful AI assistant created by a Class 9 student from West Bengal, India. Answer accurately in the user language (Bengali, Banglish, or English).',
-            tools: [{ googleSearch: {} }],
           },
         });
         if (response.text?.trim()) {
