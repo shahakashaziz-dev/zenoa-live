@@ -39,17 +39,27 @@ export default async function handler(req: IncomingMessage & { body?: any }, res
     }
     if (userMessage) parts.push({ text: userMessage });
 
-    const response = await ai.models.generateContent({
-    model: 'gemini-3.8-flash',
+        let reply = '';
+    for (const modelName of ['gemini-3.8-flash', 'gemini-3.5-flash-lite']) {
+      try {
+        const response = await ai.models.generateContent({
+          model: modelName,
+          contents: [{ role: 'user', parts }],
+          config: {
+            systemInstruction: 'You are Zenoa, a helpful AI assistant created by a Class 9 student from West Bengal, India. Answer accurately in the user language (Bengali, Banglish, or English).',
+            tools: [{ googleSearch: {} }],
+          },
+        });
+        if (response.text?.trim()) {
+          reply = response.text.trim();
+          break;
+        }
+      } catch (e: any) {
+        console.error('TRY_ERR:', modelName, e?.message || e);
+      }
+    }
+    if (!reply) throw new Error('All models failed');
 
-      contents: [{ role: 'user', parts }],
-      config: {
-        systemInstruction: 'You are Zenoa, a helpful, smart AI assistant created by a Class 9 student from West Bengal, India. Answer accurately in the user language (Bengali, Banglish, or English). Use Google Search for live facts.',
-        tools: [{ googleSearch: {} }],
-      },
-    });
-
-    const reply = response.text?.trim() || 'Sorry, no response generated.';
     res.statusCode = 200;
     res.end(JSON.stringify({ ok: true, reply }));
   } catch (err: any) {console.error('REAL_GEMINI_ERR:', err?.message || err);
