@@ -151,17 +151,8 @@ function getGeminiClient(): GoogleGenAI | null {
   const apiKey = (process.env.GEMINI_API_KEY || process.env.VITE_GEMINI_API_KEY || '').trim();
   if (!apiKey || apiKey === 'MY_GEMINI_API_KEY') {
     return null;
-  }
-  return new GoogleGenAI({
-    apiKey,
-    httpOptions: {
-      timeout: 15000,
-      headers: {
-        'User-Agent': 'aistudio-build',
-      },
-    },
-  });
-}
+  }return new GoogleGenAI({ apiKey });
+
 
 async function generateWithRetry(
   ai: GoogleGenAI,
