@@ -3,9 +3,9 @@ import {
   BookOpen,
   Camera,
   HeartHandshake,
-  History,
   ImagePlus,
   Loader2,
+  MapPin,
   Menu,
   Mic,
   MicOff,
@@ -58,7 +58,7 @@ import { runInstantDeviceCheck } from './utils/ruleEngine';
 const DEFAULT_CREATOR: CreatorProfile = {
   name: 'Akash Shah',
   grade: 'Class 9 Student Developer',
-  location: 'Built for the World',
+  location: 'West Bengal, India',
   story:
     'I built Zenoa as a Class 9 student because everyone deserves a kind, smart AI friend and study helper—without paywalls, confusing menus, or barriers.',
 };
@@ -92,6 +92,41 @@ function cleanTextForSpeech(text: string): string {
     .trim();
 }
 
+function checkLiveTimeOrLocation(text: string, locationLabel: string): string | null {
+  const q = text.toLowerCase().trim();
+  const asksTime =
+    /\b(time|shomoy|somoy|koyta|koita|kota baje|koto baje|bajche|bajlo|clock|tarikh|date|ajke ki bar|ki bar)\b/.test(
+      q,
+    );
+  const asksLocation =
+    /\b(location|kothay|kothai|where am i|amar jayga|amar location|city|district|address)\b/.test(
+      q,
+    );
+
+  if (asksTime) {
+    const now = new Date();
+    const timeStr = now.toLocaleTimeString('en-IN', {
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: true,
+    });
+    const dateStr = now.toLocaleDateString('en-IN', {
+      weekday: 'long',
+      day: 'numeric',
+      month: 'long',
+      year: 'numeric',
+    });
+    return `Ekhon live shomoy **${timeStr}** (${dateStr}) ⏰`;
+  }
+
+  if (asksLocation) {
+    return `Tomar current live location holo: **${locationLabel}** 📍`;
+  }
+
+  return null;
+}
+
 export default function App() {
   const isOnline = useOnlineStatus();
 
@@ -123,10 +158,14 @@ export default function App() {
 
   const [currentUser, setCurrentUser] = useState<LocalUser | null>(() => getActiveSession());
   const [persona, setPersona] = useState<PersonaMode>('friend');
+  const [liveClock, setLiveClock] = useState<string>(() =>
+    new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true }),
+  );
+  const [liveLocation, setLiveLocation] = useState<string>('West Bengal, India');
 
   const [sessionsState, setSessionsState] = useState<{
     ownerKey: string;
-    sessions: ChatSession[];
+    sessions: Array<ChatSession>;
   }>(() => {
     const initialUser = getActiveSession();
     const initialKey = getSessionsStorageKey(initialUser);
@@ -138,7 +177,8 @@ export default function App() {
 
   const [activeSessionId, setActiveSessionId] = useState<string>(() => {
     const initialUser = getActiveSession();
-    return loadChatSessions(initialUser)[0]?.id || '';
+    const loaded = loadChatSessions(initialUser);
+    return loaded.at(0)?.id || '';
   });
 
   const [input, setInput] = useState('');
@@ -166,9 +206,52 @@ export default function App() {
   const sessions = sessionsState.sessions;
   const activeSession =
     sessions.find((s) => s.id === activeSessionId) ||
-    sessions[0] ||
+    sessions.at(0) ||
     createFreshSession(currentUser, persona);
   const messages = activeSession.messages;
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setLiveClock(
+        new Date().toLocaleTimeString('en-IN', {
+          hour: '2-digit',
+          minute: '2-digit',
+          hour12: true,
+        }),
+      );
+    }, 15000);
+    return () => window.clearInterval(timer);
+  }, new Array());
+
+  useEffect(() => {
+    if (typeof navigator !== 'undefined' && 'geolocation' in navigator) {
+      navigator.geolocation.getCurrentPosition(
+        async (pos) => {
+          const { latitude, longitude } = pos.coords;
+          try {
+            const resp = await fetch(
+              `https://openstreetmap.org{latitude}&lon=${longitude}`,
+            );
+            const data = await resp.json();
+            const city =
+              data?.address?.city ||
+              data?.address?.town ||
+              data?.address?.village ||
+              data?.address?.state_district ||
+              'West Bengal';
+            const state = data?.address?.state || 'India';
+            setLiveLocation(`${city}, ${state}`);
+          } catch {
+            setLiveLocation(`${latitude.toFixed(2)}°N, ${longitude.toFixed(2)}°E`);
+          }
+        },
+        () => {
+          setLiveLocation('West Bengal, India');
+        },
+        { timeout: 6000 },
+      );
+    }
+  }, new Array());
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', darkMode);
@@ -177,7 +260,7 @@ export default function App() {
     } catch {
       // ignore
     }
-  }, [darkMode]);
+  }, new Array(darkMode));
 
   useEffect(() => {
     try {
@@ -185,7 +268,7 @@ export default function App() {
     } catch {
       // ignore
     }
-  }, [autoSpeak]);
+  }, new Array(autoSpeak));
 
   useEffect(() => {
     try {
@@ -193,35 +276,36 @@ export default function App() {
     } catch {
       // ignore
     }
-  }, [creatorProfile]);
+  }, new Array(creatorProfile));
 
   useEffect(() => {
     saveChatSessionsByKey(sessionsState.ownerKey, sessionsState.sessions);
-  }, [sessionsState]);
+  }, new Array(sessionsState));
 
   useEffect(() => {
-    if (sessions.length > 0 && !sessions.some((s) => s.id === activeSessionId)) {
-      setActiveSessionId(sessions[0].id);
+    const first = sessions.at(0);
+    if (first && !sessions.some((s) => s.id === activeSessionId)) {
+      setActiveSessionId(first.id);
     }
-  }, [sessions, activeSessionId]);
+  }, new Array(sessions, activeSessionId));
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, isGenerating]);
+  }, new Array(messages, isGenerating));
 
   useEffect(() => {
     const el = textareaRef.current;
     if (!el) return;
     el.style.height = 'auto';
     el.style.height = `${Math.min(el.scrollHeight, 130)}px`;
-  }, [input]);
+  }, new Array(input));
 
   useEffect(() => {
     return () => {
       window.speechSynthesis?.cancel();
       recognitionRef.current?.stop();
     };
-  }, []);
+  }, new Array());
 
   const handleSaveCreator = (updated: CreatorProfile) => {
     setCreatorProfile(updated);
@@ -266,7 +350,7 @@ export default function App() {
                 ...s,
                 persona: nextMode,
                 updatedAt: Date.now(),
-                messages: [createWelcomeMessage(currentUser, nextMode)],
+                messages: new Array(createWelcomeMessage(currentUser, nextMode)),
               }
             : s,
         ),
@@ -275,7 +359,7 @@ export default function App() {
   };
 
   const handlePhotoFilePicked = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
+    const file = e.target.files?.item(0);
     e.target.value = '';
     if (!file) return;
 
@@ -307,7 +391,7 @@ export default function App() {
       const updated = prev.sessions.map((s) => {
         if (s.id !== targetSessionId) return s;
         found = true;
-        const nextMessages = [...s.messages, msg];
+        const nextMessages = s.messages.concat(new Array(msg));
         return {
           ...s,
           title: deriveSessionTitle(nextMessages),
@@ -323,11 +407,11 @@ export default function App() {
           title: msg.role === 'user' ? msg.text.slice(0, 42) : 'New Conversation',
           persona: modeForSession,
           updatedAt: Date.now(),
-          messages: [msg],
+          messages: new Array(msg),
         };
         return {
           ownerKey: prev.ownerKey,
-          sessions: [fallbackSession, ...prev.sessions],
+          sessions: new Array(fallbackSession).concat(prev.sessions),
         };
       }
 
@@ -335,7 +419,7 @@ export default function App() {
       const rest = updated.filter((s) => s.id !== targetSessionId);
       return {
         ownerKey: prev.ownerKey,
-        sessions: active ? [active, ...rest] : updated,
+        sessions: active ? new Array(active).concat(rest) : updated,
       };
     });
   };
@@ -363,7 +447,7 @@ export default function App() {
       timestamp: Date.now(),
     };
 
-    const nextHistory = [...messages, userMsg];
+    const nextHistory = messages.concat(new Array(userMsg));
     appendMessageToSession(targetSessionId, targetOwnerKey, userMsg, 'study');
     setPendingPhoto(null);
     setInput('');
@@ -403,15 +487,15 @@ export default function App() {
         persona: 'study',
         engine: 'ai',
         latencyMs: Math.max(1, Math.round(performance.now() - startedAt)),
-          timestamp: Date.now(),
-    };
-    appendMessageToSession(targetSessionId, targetOwnerKey, replyMsg, 'study');
-    if (autoSpeak) speakMessage(replyMsg.text, replyMsg.id);
-  } finally {
-    setIsGenerating(false);
-    setThinkingLabel(null);
-  }
-};
+        timestamp: Date.now(),
+      };
+      appendMessageToSession(targetSessionId, targetOwnerKey, replyMsg, 'study');
+      if (autoSpeak) speakMessage(replyMsg.text, replyMsg.id);
+    } finally {
+      setIsGenerating(false);
+      setThinkingLabel(null);
+    }
+  };
 
   const handleSend = async (rawText?: string, overridePersona?: PersonaMode) => {
     if (isGenerating || isPreparingPhoto) return;
@@ -443,10 +527,27 @@ export default function App() {
       timestamp: Date.now(),
     };
 
-    const nextHistory = [...messages, userMsg];
+    const nextHistory = messages.concat(new Array(userMsg));
     appendMessageToSession(targetSessionId, targetOwnerKey, userMsg, currentPersona);
     if (!rawText) setInput('');
-    
+    setVoiceNotice(null);
+
+    const liveCheckReply = checkLiveTimeOrLocation(text, liveLocation);
+    if (liveCheckReply) {
+      const elapsed = Math.max(1, Math.round(performance.now() - startedAt));
+      const liveMsg: ChatMessage = {
+        id: `a-${Date.now() + 1}`,
+        role: 'assistant',
+        text: liveCheckReply,
+        persona: currentPersona,
+        engine: 'instant',
+        latencyMs: elapsed,
+        timestamp: Date.now(),
+      };
+      appendMessageToSession(targetSessionId, targetOwnerKey, liveMsg, currentPersona);
+      if (autoSpeak) speakMessage(liveMsg.text, liveMsg.id);
+      return;
+    }
 
     const instantResult = runInstantDeviceCheck(text, currentPersona, currentUser);
     const instantText =
@@ -468,6 +569,7 @@ export default function App() {
       if (autoSpeak) speakMessage(instantReply.text, instantReply.id);
       return;
     }
+
     setIsGenerating(true);
     setThinkingLabel('Thinking...');
 
@@ -537,7 +639,7 @@ export default function App() {
       speechRec.onresult = (event) => {
         let transcript = '';
         for (let i = 0; i < event.results.length; i++) {
-          transcript += event.results[i][0].transcript;
+          transcript += event.results.item(i)?.item(0)?.transcript || '';
         }
         setInput(transcript);
       };
@@ -571,7 +673,7 @@ export default function App() {
     const fresh = createFreshSession(currentUser, persona);
     setSessionsState((prev) => ({
       ownerKey: prev.ownerKey,
-      sessions: [fresh, ...prev.sessions],
+      sessions: new Array(fresh).concat(prev.sessions),
     }));
     setActiveSessionId(fresh.id);
   };
@@ -589,9 +691,10 @@ export default function App() {
 
   const handleDeleteSession = (sessionId: string) => {
     const remaining = sessionsState.sessions.filter((s) => s.id !== sessionId);
-    if (remaining.length === 0) {
+    const firstRemaining = remaining.at(0);
+    if (!firstRemaining) {
       const fresh = createFreshSession(currentUser, persona);
-      setSessionsState((prev) => ({ ownerKey: prev.ownerKey, sessions: [fresh] }));
+      setSessionsState((prev) => ({ ownerKey: prev.ownerKey, sessions: new Array(fresh) }));
       setActiveSessionId(fresh.id);
       return;
     }
@@ -600,18 +703,21 @@ export default function App() {
       sessions: remaining,
     }));
     if (activeSessionId === sessionId) {
-      setActiveSessionId(remaining[0].id);
-      setPersona(remaining[0].persona);
+      setActiveSessionId(firstRemaining.id);
+      setPersona(firstRemaining.persona);
     }
   };
 
   const handleAuthenticated = (user: LocalUser) => {
     const userKey = getSessionsStorageKey(user);
     const userSessions = loadChatSessions(user);
+    const first = userSessions.at(0);
     setCurrentUser(user);
     setSessionsState({ ownerKey: userKey, sessions: userSessions });
-    setActiveSessionId(userSessions[0].id);
-    setPersona(userSessions[0].persona);
+    if (first) {
+      setActiveSessionId(first.id);
+      setPersona(first.persona);
+    }
   };
 
   const handleSaveProfile = (updates: { name: string; avatar: AvatarId }) => {
@@ -621,8 +727,8 @@ export default function App() {
       setSessionsState((prev) => ({
         ...prev,
         sessions: prev.sessions.map((s, idx) =>
-          idx === 0 && s.messages.length === 1 && s.messages[0].id.startsWith('welcome-')
-            ? { ...s, messages: [createWelcomeMessage(updated, persona)] }
+          idx === 0 && s.messages.length === 1 && s.messages.at(0)?.id.startsWith('welcome-')
+            ? { ...s, messages: new Array(createWelcomeMessage(updated, persona)) }
             : s,
         ),
       }));
@@ -640,12 +746,13 @@ export default function App() {
     const guestKey = getSessionsStorageKey(null);
     const guestSessions = loadChatSessions(null);
     setSessionsState({ ownerKey: guestKey, sessions: guestSessions });
-    if (guestSessions.length > 0) {
-      setPersona(guestSessions[0].persona);
-      setActiveSessionId(guestSessions[0].id);
+    const firstGuest = guestSessions.at(0);
+    if (firstGuest) {
+      setPersona(firstGuest.persona);
+      setActiveSessionId(firstGuest.id);
     } else {
       const fresh = createFreshSession(null, persona);
-      setSessionsState({ ownerKey: guestKey, sessions: [fresh] });
+      setSessionsState({ ownerKey: guestKey, sessions: new Array(fresh) });
       setActiveSessionId(fresh.id);
     }
   };
@@ -662,66 +769,117 @@ export default function App() {
     setCreatorProfile(DEFAULT_CREATOR);
     setCurrentUser(null);
     const fresh = createFreshSession(null, persona);
-    setSessionsState({ ownerKey: getSessionsStorageKey(null), sessions: [fresh] });
+    setSessionsState({ ownerKey: getSessionsStorageKey(null), sessions: new Array(fresh) });
     setActiveSessionId(fresh.id);
   };
 
   return (
-    <div className="h-dvh flex bg-white text-slate-900 dark:bg-slate-950 dark:text-slate-100">
-      {/* Clean Minimal Top Header with Hamburger History Toggle */}
-      <header className="shrink-0 sticky top-0 z-30 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-b border-slate-200 dark:border-slate-800 px-3 sm:px-5 h-14 flex items-center justify-between gap-2 fixed inset-x-0">
-        <div className="flex items-center gap-2 sm:gap-2.5 min-w-0">
+    <div className="h-dvh flex bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100 overflow-hidden">
+      {/* Slim Left Dock Rail (Original Zenoa Getup) */}
+      <aside className="hidden sm:flex w-14 shrink-0 flex-col items-center justify-between py-3 border-r border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 z-30">
+        <div className="flex flex-col items-center gap-2.5">
           <button
             type="button"
             onClick={() => setHistoryOpen(true)}
             aria-label="Open chat history"
             title="Chat History"
-            className="min-h-[40px] min-w-[40px] inline-flex items-center justify-center rounded-xl border border-indigo-200 dark:border-indigo-800 bg-indigo-50 dark:bg-indigo-950/70 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-900/70 transition cursor-pointer shrink-0"
+            className="w-10 h-10 inline-flex items-center justify-center rounded-xl text-slate-600 dark:text-slate-300 hover:bg-indigo-50 dark:hover:bg-indigo-950/70 hover:text-indigo-600 transition cursor-pointer"
           >
-            <Menu className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
+            <Menu className="w-5 h-5" />
           </button>
-          <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-sky-500 to-indigo-600 text-white flex items-center justify-center font-bold text-base shadow-sm shrink-0">
-            Z
-          </div>
-          <span className="text-lg font-bold tracking-tight text-slate-900 dark:text-white whitespace-nowrap">
-            Zenoa
-          </span>
+          <button
+            type="button"
+            onClick={handleNewChat}
+            aria-label="New chat"
+            title="New Chat"
+            className="w-10 h-10 inline-flex items-center justify-center rounded-xl bg-indigo-50 dark:bg-indigo-950/70 text-indigo-600 dark:text-indigo-300 hover:bg-indigo-100 transition cursor-pointer"
+          >
+            <Plus className="w-5 h-5" />
+          </button>
         </div>
 
-        <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
-          <PWAInstallButton />
-
+        <div className="flex flex-col items-center gap-2.5">
           <button
             type="button"
             onClick={() => setDarkMode((d) => !d)}
-            aria-label={darkMode ? 'Switch to light theme' : 'Switch to dark theme'}
+            aria-label="Toggle theme"
             title={darkMode ? 'Light mode' : 'Dark mode'}
-            className="min-h-[40px] min-w-[40px] inline-flex items-center justify-center rounded-xl border border-indigo-200 dark:border-indigo-800 bg-indigo-50 dark:bg-indigo-950/70 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-900/70 transition cursor-pointer"
+            className="w-10 h-10 inline-flex items-center justify-center rounded-xl text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
           >
-            {darkMode ? <Sun className="w-4 h-4 text-sky-400" /> : <Moon className="w-4 h-4 text-indigo-600" />}
+            {darkMode ? <Sun className="w-4 h-4 text-sky-400" /> : <Moon className="w-4 h-4" />}
           </button>
-
           <button
             type="button"
             onClick={() => setSettingsOpen(true)}
-            aria-label="Open settings"
+            aria-label="Settings"
             title="Settings"
-            className="min-h-[40px] min-w-[40px] inline-flex items-center justify-center rounded-xl border border-indigo-200 dark:border-indigo-800 bg-indigo-50 dark:bg-indigo-950/70 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-900/70 transition cursor-pointer"
+            className="w-10 h-10 inline-flex items-center justify-center rounded-xl text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
           >
-            <Settings className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+            <Settings className="w-4 h-4" />
           </button>
         </div>
-      </header>
+      </aside>
 
-      {/* Main Column */}
-      <div className="flex-1 flex flex-col min-w-0 pt-14">
-        {/* Top Sub-bar: Mode Switcher + Status */}
-        <div className="shrink-0 border-b border-slate-200/80 dark:border-slate-800/80 bg-slate-50/80 dark:bg-slate-900/60 px-3 sm:px-5 py-2 flex items-center justify-between gap-2 flex-wrap">
-          <div className="inline-flex rounded-xl bg-slate-200/80 dark:bg-slate-800 p-1 gap-1">
+      {/* Main Content Area */}
+      <div className="flex-1 flex flex-col min-w-0">
+        {/* Top Clean Header with Live Time & Live Location */}
+        <header className="shrink-0 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-b border-slate-200 dark:border-slate-800 px-3 sm:px-5 h-14 flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2 min-w-0">
+            <button
+              type="button"
+              onClick={() => setHistoryOpen(true)}
+              aria-label="Open chat history"
+              className="sm:hidden min-h-[38px] min-w-[38px] inline-flex items-center justify-center rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-200 cursor-pointer shrink-0"
+            >
+              <Menu className="w-5 h-5" />
+            </button>
+            <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-sky-500 to-indigo-600 text-white flex items-center justify-center font-bold text-base shadow-sm shrink-0">
+              Z
+            </div>
+            <div className="min-w-0">
+              <div className="flex items-center gap-1.5">
+                <span className="text-base sm:text-lg font-bold tracking-tight text-slate-900 dark:text-white truncate">
+                  Zenoa
+                </span>
+                <span className="hidden xs:inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200/80 dark:border-emerald-800">
+                  ● {liveClock}
+                </span>
+              </div>
+              <div className="flex items-center gap-1 text-[10px] text-slate-500 dark:text-slate-400 truncate">
+                <MapPin className="w-2.5 h-2.5 text-indigo-500 shrink-0" />
+                <span className="truncate">{liveLocation}</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-1.5 shrink-0">
+            <PWAInstallButton />
+            <button
+              type="button"
+              onClick={() => setDarkMode((d) => !d)}
+              aria-label="Toggle theme"
+              className="sm:hidden min-h-[38px] min-w-[38px] inline-flex items-center justify-center rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-200 cursor-pointer"
+            >
+              {darkMode ? <Sun className="w-4 h-4 text-sky-400" /> : <Moon className="w-4 h-4" />}
+            </button>
+            <button
+              type="button"
+              onClick={() => setSettingsOpen(true)}
+              aria-label="Settings"
+              className="sm:hidden min-h-[38px] min-w-[38px] inline-flex items-center justify-center rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-200 cursor-pointer"
+            >
+              <Settings className="w-4 h-4" />
+            </button>
+          </div>
+        </header>
+
+        {/* Sub-header Mode Switcher */}
+        <div className="shrink-0 border-b border-slate-200/70 dark:border-slate-800/70 bg-white/70 dark:bg-slate-900/50 px-3 sm:px-5 py-2 flex items-center justify-between gap-2">
+          <div className="inline-flex rounded-xl bg-slate-100 dark:bg-slate-800 p-1 gap-1">
             <button
               type="button"
               onClick={() => handleSelectPersona('friend')}
-              className={`min-h-[34px] px-3 rounded-lg text-xs font-semibold inline-flex items-center gap-1.5 transition cursor-pointer ${
+              className={`min-h-[32px] px-3 rounded-lg text-xs font-semibold inline-flex items-center gap-1.5 transition cursor-pointer ${
                 persona === 'friend'
                   ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-300 shadow-xs'
                   : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
@@ -733,7 +891,7 @@ export default function App() {
             <button
               type="button"
               onClick={() => handleSelectPersona('study')}
-              className={`min-h-[34px] px-3 rounded-lg text-xs font-semibold inline-flex items-center gap-1.5 transition cursor-pointer ${
+              className={`min-h-[32px] px-3 rounded-lg text-xs font-semibold inline-flex items-center gap-1.5 transition cursor-pointer ${
                 persona === 'study'
                   ? 'bg-white dark:bg-slate-900 text-sky-600 dark:text-sky-300 shadow-xs'
                   : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
@@ -753,14 +911,14 @@ export default function App() {
             <button
               type="button"
               onClick={handleNewChat}
-              className="min-h-[34px] px-2.5 rounded-lg text-xs font-semibold inline-flex items-center gap-1 border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
+              className="min-h-[32px] px-2.5 rounded-lg text-xs font-semibold inline-flex items-center gap-1 border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
             >
-              <Plus className="w-3.5 h-3.5" /> New Chat
+              <Plus className="w-3.5 h-3.5" /> New
             </button>
           </div>
         </div>
 
-        {/* Messages Feed */}
+        {/* Chat Stream */}
         <main className="flex-1 overflow-y-auto px-3 sm:px-6 py-4 space-y-4">
           <div className="max-w-3xl mx-auto space-y-4">
             {messages.map((msg) => {
@@ -774,7 +932,7 @@ export default function App() {
                     className={`max-w-[88%] sm:max-w-[78%] rounded-2xl px-4 py-3 text-sm leading-relaxed shadow-xs ${
                       isUser
                         ? 'bg-gradient-to-br from-sky-600 to-indigo-600 text-white rounded-br-sm'
-                        : 'bg-slate-100 dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 text-slate-800 dark:text-slate-100 rounded-bl-sm'
+                        : 'bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 text-slate-800 dark:text-slate-100 rounded-bl-sm'
                     }`}
                   >
                     {msg.imageDataUrl && (
@@ -787,7 +945,7 @@ export default function App() {
                     <MessageContent text={msg.text} isUser={isUser} />
 
                     {!isUser && (
-                      <div className="mt-2 pt-2 border-t border-slate-200/70 dark:border-slate-800 flex items-center justify-between gap-2 text-[11px] text-slate-500 dark:text-slate-400">
+                      <div className="mt-2 pt-2 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between gap-2 text-[11px] text-slate-500 dark:text-slate-400">
                         <span className="inline-flex items-center gap-1">
                           <Sparkles className="w-3 h-3 text-indigo-500" />
                           Zenoa AI
@@ -797,7 +955,7 @@ export default function App() {
                           type="button"
                           onClick={() => speakMessage(msg.text, msg.id)}
                           aria-label={speakingMessageId === msg.id ? 'Stop speaking' : 'Listen to reply'}
-                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md hover:bg-slate-200/70 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 transition cursor-pointer"
+                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 transition cursor-pointer"
                         >
                           {speakingMessageId === msg.id ? (
                             <>
@@ -818,7 +976,7 @@ export default function App() {
 
             {isGenerating && (
               <div className="flex justify-start">
-                <div className="rounded-2xl rounded-bl-sm px-4 py-3 bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-sm text-slate-600 dark:text-slate-300 inline-flex items-center gap-2">
+                <div className="rounded-2xl rounded-bl-sm px-4 py-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-sm text-slate-600 dark:text-slate-300 inline-flex items-center gap-2 shadow-xs">
                   <Loader2 className="w-4 h-4 animate-spin text-indigo-500" />
                   <span>{thinkingLabel || 'Thinking...'}</span>
                 </div>
@@ -829,11 +987,11 @@ export default function App() {
           </div>
         </main>
 
-        {/* Bottom Composer */}
-        <footer className="shrink-0 border-t border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 px-3 sm:px-6 py-3">
-          <div className="max-w-3xl mx-auto space-y-2">
+        {/* Bottom Input Area + Original Multilingual Sub-caption */}
+        <footer className="shrink-0 border-t border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-3 sm:px-6 pt-2.5 pb-2">
+          <div className="max-w-3xl mx-auto space-y-1.5">
             {voiceNotice && (
-              <div className="text-xs text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/50 border border-amber-200 dark:border-amber-800 rounded-xl px-3 py-2 flex items-center justify-between gap-2">
+              <div className="text-xs text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/50 border border-amber-200 dark:border-amber-800 rounded-xl px-3 py-1.5 flex items-center justify-between gap-2">
                 <span>{voiceNotice}</span>
                 <button
                   type="button"
@@ -846,11 +1004,11 @@ export default function App() {
             )}
 
             {pendingPhoto && (
-              <div className="inline-flex items-center gap-2 bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-1.5 pr-2.5">
+              <div className="inline-flex items-center gap-2 bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-1.5 pr-2.5">
                 <img
                   src={pendingPhoto}
                   alt="Selected preview"
-                  className="w-11 h-11 rounded-lg object-cover"
+                  className="w-10 h-10 rounded-lg object-cover"
                 />
                 <span className="text-xs font-medium text-slate-700 dark:text-slate-300">
                   Photo ready — ask your question or press Send
@@ -859,14 +1017,14 @@ export default function App() {
                   type="button"
                   onClick={() => setPendingPhoto(null)}
                   aria-label="Remove photo"
-                  className="p-1 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-800 text-slate-500 cursor-pointer"
+                  className="p-1 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-500 cursor-pointer"
                 >
                   <X className="w-3.5 h-3.5" />
                 </button>
               </div>
             )}
 
-            <div className="flex items-end gap-2 bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-2">
+            <div className="flex items-end gap-1.5 bg-slate-100 dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700 rounded-2xl p-1.5">
               <input
                 ref={cameraInputRef}
                 type="file"
@@ -889,7 +1047,7 @@ export default function App() {
                 disabled={isGenerating || isPreparingPhoto}
                 title="Take Photo"
                 aria-label="Take Photo"
-                className="min-h-[40px] min-w-[40px] inline-flex items-center justify-center rounded-xl text-slate-600 dark:text-slate-300 hover:bg-slate-200/80 dark:hover:bg-slate-800 transition cursor-pointer shrink-0"
+                className="min-h-[38px] min-w-[38px] inline-flex items-center justify-center rounded-xl text-slate-600 dark:text-slate-300 hover:bg-slate-200/80 dark:hover:bg-slate-700 transition cursor-pointer shrink-0"
               >
                 <Camera className="w-5 h-5" />
               </button>
@@ -900,7 +1058,7 @@ export default function App() {
                 disabled={isGenerating || isPreparingPhoto}
                 title="Upload Image"
                 aria-label="Upload Image"
-                className="min-h-[40px] min-w-[40px] inline-flex items-center justify-center rounded-xl text-slate-600 dark:text-slate-300 hover:bg-slate-200/80 dark:hover:bg-slate-800 transition cursor-pointer shrink-0"
+                className="min-h-[38px] min-w-[38px] inline-flex items-center justify-center rounded-xl text-slate-600 dark:text-slate-300 hover:bg-slate-200/80 dark:hover:bg-slate-700 transition cursor-pointer shrink-0"
               >
                 <ImagePlus className="w-5 h-5" />
               </button>
@@ -931,10 +1089,10 @@ export default function App() {
                 onClick={handleToggleMic}
                 title={isListening ? 'Stop listening' : 'Voice input'}
                 aria-label={isListening ? 'Stop listening' : 'Voice input'}
-                className={`min-h-[40px] min-w-[40px] inline-flex items-center justify-center rounded-xl transition cursor-pointer shrink-0 ${
+                className={`min-h-[38px] min-w-[38px] inline-flex items-center justify-center rounded-xl transition cursor-pointer shrink-0 ${
                   isListening
                     ? 'bg-rose-500 text-white animate-pulse'
-                    : 'text-slate-600 dark:text-slate-300 hover:bg-slate-200/80 dark:hover:bg-slate-800'
+                    : 'text-slate-600 dark:text-slate-300 hover:bg-slate-200/80 dark:hover:bg-slate-700'
                 }`}
               >
                 {isListening ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
@@ -946,11 +1104,15 @@ export default function App() {
                 disabled={isGenerating || isPreparingPhoto || (!input.trim() && !pendingPhoto)}
                 title="Send message"
                 aria-label="Send message"
-                className="min-h-[40px] min-w-[40px] inline-flex items-center justify-center rounded-xl bg-gradient-to-br from-sky-500 to-indigo-600 text-white disabled:opacity-40 hover:opacity-95 transition cursor-pointer shrink-0 shadow-xs"
+                className="min-h-[38px] min-w-[38px] inline-flex items-center justify-center rounded-xl bg-gradient-to-br from-sky-500 to-indigo-600 text-white disabled:opacity-40 hover:opacity-95 transition cursor-pointer shrink-0 shadow-xs"
               >
                 <Send className="w-4 h-4" />
               </button>
             </div>
+
+            <p className="text-center text-[10px] text-slate-400 dark:text-slate-500">
+              Speak or type in বাংলা • हिन्दी • English • Banglish • Hinglish • Free forever
+            </p>
           </div>
         </footer>
       </div>
