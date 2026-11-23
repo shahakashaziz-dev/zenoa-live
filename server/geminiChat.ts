@@ -1,5 +1,6 @@
 import { GoogleGenAI, ThinkingLevel, type Content, type Part } from '@google/genai';
 
+
 const GEMINI_MODEL = 'gemini-2.5-flash';
 
 
@@ -151,8 +152,8 @@ function getGeminiClient(): GoogleGenAI | null {
   const apiKey = (process.env.GEMINI_API_KEY || process.env.VITE_GEMINI_API_KEY || '').trim();
   if (!apiKey || apiKey === 'MY_GEMINI_API_KEY') {
     return null;
-  }return new GoogleGenAI({ apiKey });
-
+  return new GoogleGenAI({ apiKey });
+  }
 
 async function generateWithRetry(
   ai: GoogleGenAI,
