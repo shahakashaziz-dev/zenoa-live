@@ -47,16 +47,12 @@ import {
 } from './utils/chatHistory';
 import { askZenoaViaServer } from './utils/geminiClient';
 import {
-  answerPhotoStudyLocally,
-  answerWithKnowledgeAndNewsEngine,
-} from './utils/knowledgeNewsEngine';
-import {
   deleteAccountAndAllData,
   getActiveSession,
   logoutLocal,
   updateActiveProfile,
 } from './utils/localAuth';
-import { extractTextFromStudyPhoto, preparePhotoForStudy } from './utils/photoOcr';
+import { preparePhotoForStudy } from './utils/photoOcr';
 import { runInstantDeviceCheck } from './utils/ruleEngine';
 
 const DEFAULT_CREATOR: CreatorProfile = {
@@ -64,7 +60,7 @@ const DEFAULT_CREATOR: CreatorProfile = {
   grade: 'Class 9 Student Developer',
   location: 'Built for the World',
   story:
-    'I built Zenoa as a Class 9 student because everyone deserves a kind, smart AI friend and study helper—without paywalls, API keys, or language barriers. Everything runs right inside your browser so it stays free and private forever.',
+    'I built Zenoa as a Class 9 student because everyone deserves a kind, smart AI friend and study helper—without paywalls, confusing menus, or barriers.',
 };
 
 interface SpeechRecognitionInstance {
@@ -81,62 +77,79 @@ interface SpeechRecognitionInstance {
 function inferSpeechLangFromText(text: string): string {
   if (/[\u0980-\u09FF]/.test(text)) return 'bn-BD';
   if (/[\u0900-\u097F]/.test(text)) return 'hi-IN';
-  if (/[\u0600-\u06FF]/.test(text)) return 'ar-SA';
   return 'en-US';
+}
+
+function cleanTextForSpeech(text: string): string {
+  return text
+    .replace(/```[\s\(\S\)]*?```/g, ' Code block omitted. ')
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/\*\*([^*]+)\*\*/g, '$1')
+    .replace(/\*([^*]+)\*/g, '$1')
+    .replace(/^#+\s*/gm, '')
+    .replace(/^[•\-*]\s+/gm, '')
+    .replace(/\n+/g, '. ')
+    .trim();
 }
 
 export default function App() {
   const isOnline = useOnlineStatus();
 
   const [darkMode, setDarkMode] = useState<boolean>(() => {
-    if (typeof window === 'undefined') return false;
-    return localStorage.getItem('zenoa_theme') === 'dark';
+    try {
+      return localStorage.getItem('zenoa_dark_mode') === 'true';
+    } catch {
+      return false;
+    }
   });
 
-  const [currentUser, setCurrentUser] = useState<LocalUser | null>(() => {
-    if (typeof window === 'undefined') return null;
-    const session = getActiveSession();
-    return session && !session.isGuest ? session : null;
+  const [autoSpeak, setAutoSpeak] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('zenoa_auto_speak') === 'true';
+    } catch {
+      return false;
+    }
   });
-
-  const [sessionsState, setSessionsState] = useState<{
-    ownerKey: string;
-    sessions: ChatSession[];
-  }>(() => ({
-    ownerKey: getSessionsStorageKey(currentUser),
-    sessions: loadChatSessions(currentUser),
-  }));
-
-  const [activeSession, setActiveSession] = useState<ChatSession>(
-    () => sessionsState.sessions[0] ?? createFreshSession(currentUser, 'friend'),
-  );
-
-  const messages = activeSession.messages;
-
-  const [persona, setPersona] = useState<PersonaMode>(() => activeSession.persona);
-  const [autoSpeak, setAutoSpeak] = useState<boolean>(false);
-  const [speakingMessageId, setSpeakingMessageId] = useState<string | null>(null);
-  const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
-
-  const [input, setInput] = useState('');
-  const [isGenerating, setIsGenerating] = useState(false);
-  const [thinkingLabel, setThinkingLabel] = useState<string | null>(null);
-  const [isListening, setIsListening] = useState(false);
-  const [voiceNotice, setVoiceNotice] = useState<string | null>(null);
-
-  const [pendingPhoto, setPendingPhoto] = useState<string | null>(null);
-  const [isPreparingPhoto, setIsPreparingPhoto] = useState(false);
-  const [photoMenuOpen, setPhotoMenuOpen] = useState(false);
 
   const [creatorProfile, setCreatorProfile] = useState<CreatorProfile>(() => {
     try {
-      const raw = localStorage.getItem('zenoa_creator');
-      if (raw) return JSON.parse(raw) as CreatorProfile;
+      const raw = localStorage.getItem('zenoa_creator_profile');
+      if (raw) return { ...DEFAULT_CREATOR, ...JSON.parse(raw) };
     } catch {
       // ignore
     }
     return DEFAULT_CREATOR;
   });
+
+  const [currentUser, setCurrentUser] = useState<LocalUser | null>(() => getActiveSession());
+  const [persona, setPersona] = useState<PersonaMode>('friend');
+
+  const [sessionsState, setSessionsState] = useState<{
+    ownerKey: string;
+    sessions: ChatSession[];
+  }>(() => {
+    const initialUser = getActiveSession();
+    const initialKey = getSessionsStorageKey(initialUser);
+    return {
+      ownerKey: initialKey,
+      sessions: loadChatSessions(initialUser),
+    };
+  });
+
+  const [activeSessionId, setActiveSessionId] = useState<string>(() => {
+    const initialUser = getActiveSession();
+    return loadChatSessions(initialUser)[0]?.id || '';
+  });
+
+  const [input, setInput] = useState('');
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [thinkingLabel, setThinkingLabel] = useState<string | null>(null);
+  const [isListening, setIsListening] = useState(false);
+  const [speakingMessageId, setSpeakingMessageId] = useState<string | null>(null);
+  const [voiceNotice, setVoiceNotice] = useState<string | null>(null);
+
+  const [pendingPhoto, setPendingPhoto] = useState<string | null>(null);
+  const [isPreparingPhoto, setIsPreparingPhoto] = useState(false);
 
   const [historyOpen, setHistoryOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -144,120 +157,139 @@ export default function App() {
   const [privacyOpen, setPrivacyOpen] = useState(false);
   const [termsOpen, setTermsOpen] = useState(false);
 
-  const chatEndRef = useRef<HTMLDivElement | null>(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const recognitionRef = useRef<SpeechRecognitionInstance | null>(null);
-  const cameraInputRef = useRef<HTMLInputElement | null>(null);
-  const galleryInputRef = useRef<HTMLInputElement | null>(null);
-  const photoMenuRef = useRef<HTMLDivElement | null>(null);
-  const activeSessionRef = useRef<ChatSession>(activeSession);
-  const currentUserRef = useRef<LocalUser | null>(currentUser);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
+  const galleryInputRef = useRef<HTMLInputElement>(null);
+
+  const sessions = sessionsState.sessions;
+  const activeSession =
+    sessions.find((s) => s.id === activeSessionId) ||
+    sessions[0] ||
+    createFreshSession(currentUser, persona);
+  const messages = activeSession.messages;
 
   useEffect(() => {
-    activeSessionRef.current = activeSession;
-  }, [activeSession]);
-
-  useEffect(() => {
-    currentUserRef.current = currentUser;
-  }, [currentUser]);
-
-  useEffect(() => {
-    const root = document.documentElement;
-    if (darkMode) {
-      root.classList.add('dark');
-      localStorage.setItem('zenoa_theme', 'dark');
-    } else {
-      root.classList.remove('dark');
-      localStorage.setItem('zenoa_theme', 'light');
+    document.documentElement.classList.toggle('dark', darkMode);
+    try {
+      localStorage.setItem('zenoa_dark_mode', String(darkMode));
+    } catch {
+      // ignore
     }
   }, [darkMode]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('zenoa_auto_speak', String(autoSpeak));
+    } catch {
+      // ignore
+    }
+  }, [autoSpeak]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('zenoa_creator_profile', JSON.stringify(creatorProfile));
+    } catch {
+      // ignore
+    }
+  }, [creatorProfile]);
 
   useEffect(() => {
     saveChatSessionsByKey(sessionsState.ownerKey, sessionsState.sessions);
   }, [sessionsState]);
 
   useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    if (sessions.length > 0 && !sessions.some((s) => s.id === activeSessionId)) {
+      setActiveSessionId(sessions[0].id);
+    }
+  }, [sessions, activeSessionId]);
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, isGenerating]);
 
   useEffect(() => {
-    if (typeof window === 'undefined' || !('speechSynthesis' in window)) return;
-    const syncVoices = () => {
-      setVoices(window.speechSynthesis.getVoices());
-    };
-    syncVoices();
-    window.speechSynthesis.addEventListener('voiceschanged', syncVoices);
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${Math.min(el.scrollHeight, 130)}px`;
+  }, [input]);
+
+  useEffect(() => {
     return () => {
-      window.speechSynthesis.removeEventListener('voiceschanged', syncVoices);
-      window.speechSynthesis.cancel();
+      window.speechSynthesis?.cancel();
+      recognitionRef.current?.stop();
     };
   }, []);
 
-  useEffect(() => {
-    if (!photoMenuOpen) return;
-    const handleOutside = (e: MouseEvent) => {
-      if (photoMenuRef.current && !photoMenuRef.current.contains(e.target as Node)) {
-        setPhotoMenuOpen(false);
-      }
-    };
-    const handleEsc = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setPhotoMenuOpen(false);
-    };
-    document.addEventListener('mousedown', handleOutside);
-    window.addEventListener('keydown', handleEsc);
-    return () => {
-      document.removeEventListener('mousedown', handleOutside);
-      window.removeEventListener('keydown', handleEsc);
-    };
-  }, [photoMenuOpen]);
+  const handleSaveCreator = (updated: CreatorProfile) => {
+    setCreatorProfile(updated);
+  };
 
-  const speakMessage = (text: string, msgId: string) => {
+  const speakMessage = (text: string, messageId: string) => {
     if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
-      setVoiceNotice('Speech synthesis is not supported in this browser.');
+      setVoiceNotice('Voice playback is not supported in this browser.');
       return;
     }
 
-    if (speakingMessageId === msgId) {
+    if (speakingMessageId === messageId) {
       window.speechSynthesis.cancel();
       setSpeakingMessageId(null);
       return;
     }
 
     window.speechSynthesis.cancel();
-    const cleaned = text.replace(/\[([^\]]+)\]\([^)]+\)/g, '$1').replace(/[*_`#]/g, '');
+    const cleaned = cleanTextForSpeech(text);
+    if (!cleaned) return;
+
     const utterance = new SpeechSynthesisUtterance(cleaned);
-    const targetSpeechLang = inferSpeechLangFromText(cleaned);
-    utterance.lang = targetSpeechLang;
+    utterance.lang = inferSpeechLangFromText(cleaned);
+    utterance.rate = 1.0;
+    utterance.pitch = 1.02;
 
-    const prefix = targetSpeechLang.split('-')[0].toLowerCase();
-    const matchedVoice =
-      voices.find((v) => v.lang.toLowerCase() === targetSpeechLang.toLowerCase()) ||
-      voices.find((v) => v.lang.toLowerCase().startsWith(prefix)) ||
-      voices.find((v) => v.default);
-    if (matchedVoice) utterance.voice = matchedVoice;
-
-    utterance.rate = 0.98;
+    utterance.onstart = () => setSpeakingMessageId(messageId);
     utterance.onend = () => setSpeakingMessageId(null);
     utterance.onerror = () => setSpeakingMessageId(null);
 
-    setSpeakingMessageId(msgId);
     window.speechSynthesis.speak(utterance);
   };
 
-  const handlePhotoSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleSelectPersona = (nextMode: PersonaMode) => {
+    setPersona(nextMode);
+    if (!sessionHasUserMessage(activeSession)) {
+      setSessionsState((prev) => ({
+        ...prev,
+        sessions: prev.sessions.map((s) =>
+          s.id === activeSession.id
+            ? {
+                ...s,
+                persona: nextMode,
+                updatedAt: Date.now(),
+                messages: [createWelcomeMessage(currentUser, nextMode)],
+              }
+            : s,
+        ),
+      }));
+    }
+  };
+
+  const handlePhotoFilePicked = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     e.target.value = '';
-    setPhotoMenuOpen(false);
     if (!file) return;
 
-    setVoiceNotice(null);
     setIsPreparingPhoto(true);
+    setVoiceNotice(null);
     try {
-      const preparedDataUrl = await preparePhotoForStudy(file);
-      setPendingPhoto(preparedDataUrl);
-    } catch (err) {
-      setVoiceNotice(
-        err instanceof Error ? err.message : 'Could not open that photo. Please try another image.',
-      );
+      const prepared = await preparePhotoForStudy(file);
+      setPendingPhoto(prepared);
+      if (persona !== 'study') {
+        handleSelectPersona('study');
+      }
+      textareaRef.current?.focus();
+    } catch {
+      setVoiceNotice('Could not open that photo. Please try a JPG or PNG image.');
     } finally {
       setIsPreparingPhoto(false);
     }
@@ -266,72 +298,65 @@ export default function App() {
   const appendMessageToSession = (
     targetSessionId: string,
     targetOwnerKey: string,
-    newMessage: ChatMessage,
-    sessionPersona: PersonaMode,
+    msg: ChatMessage,
+    modeForSession: PersonaMode,
   ) => {
-    const now = Date.now();
-    setActiveSession((prev) => {
-      if (prev.id !== targetSessionId) return prev;
-      const nextMessages = [...prev.messages, newMessage];
-      return {
-        ...prev,
-        title: deriveSessionTitle(nextMessages),
-        messages: nextMessages,
-        persona: sessionPersona,
-        updatedAt: now,
-      };
-    });
-
-    setSessionsState((prevState) => {
-      if (prevState.ownerKey !== targetOwnerKey) return prevState;
-      const existing = prevState.sessions.find((s) => s.id === targetSessionId);
-      let updatedSession: ChatSession;
-
-      if (existing) {
-        const nextMessages = [...existing.messages, newMessage];
-        updatedSession = {
-          ...existing,
+    setSessionsState((prev) => {
+      if (prev.ownerKey !== targetOwnerKey) return prev;
+      let found = false;
+      const updated = prev.sessions.map((s) => {
+        if (s.id !== targetSessionId) return s;
+        found = true;
+        const nextMessages = [...s.messages, msg];
+        return {
+          ...s,
           title: deriveSessionTitle(nextMessages),
+          persona: modeForSession,
+          updatedAt: Date.now(),
           messages: nextMessages,
-          persona: sessionPersona,
-          updatedAt: now,
         };
-      } else {
-        const base =
-          activeSessionRef.current.id === targetSessionId
-            ? activeSessionRef.current
-            : createFreshSession(currentUserRef.current, sessionPersona);
-        const nextMessages = base.messages.some((m) => m.id === newMessage.id)
-          ? base.messages
-          : [...base.messages, newMessage];
-        updatedSession = {
-          ...base,
-          title: deriveSessionTitle(nextMessages),
-          messages: nextMessages,
-          persona: sessionPersona,
-          updatedAt: now,
+      });
+
+      if (!found) {
+        const fallbackSession: ChatSession = {
+          id: targetSessionId,
+          title: msg.role === 'user' ? msg.text.slice(0, 42) : 'New Conversation',
+          persona: modeForSession,
+          updatedAt: Date.now(),
+          messages: [msg],
+        };
+        return {
+          ownerKey: prev.ownerKey,
+          sessions: [fallbackSession, ...prev.sessions],
         };
       }
 
-      const others = prevState.sessions.filter((s) => s.id !== targetSessionId);
+      const active = updated.find((s) => s.id === targetSessionId);
+      const rest = updated.filter((s) => s.id !== targetSessionId);
       return {
-        ownerKey: targetOwnerKey,
-        sessions: sessionHasUserMessage(updatedSession) ? [updatedSession, ...others] : others,
+        ownerKey: prev.ownerKey,
+        sessions: active ? [active, ...rest] : updated,
       };
     });
   };
 
   const handlePhotoStudySend = async (
     photoDataUrl: string,
-    typedText: string,
+    rawQuestion: string,
     startedAt: number,
   ) => {
+    const typedText = rawQuestion.trim();
     const targetSessionId = activeSession.id;
     const targetOwnerKey = sessionsState.ownerKey;
+
+    if (persona !== 'study') {
+      setPersona('study');
+    }
+
     const userMsg: ChatMessage = {
       id: `u-${Date.now()}`,
       role: 'user',
-      text: typedText,
+      text: typedText || 'Please read this photo and explain it clearly.',
       imageDataUrl: photoDataUrl,
       persona: 'study',
       engine: 'ai',
@@ -347,7 +372,6 @@ export default function App() {
     setThinkingLabel('Analyzing image...');
 
     try {
-      // Primary: Direct multimodal Gemini understanding (screenshot/photo + last 10 messages)
       if (isOnline) {
         const aiResult = await askZenoaViaServer({
           userMessage: typedText,
@@ -372,10 +396,10 @@ export default function App() {
         }
       }
 
-        const replyMsg: ChatMessage = {
+      const replyMsg: ChatMessage = {
         id: `a-${Date.now() + 1}`,
         role: 'assistant',
-        text: 'Sorry, server is busy right now. Please wait 3 seconds and send the photo again!',
+        text: 'Server is busy right now. Please wait 3 seconds and send the photo again!',
         persona: 'study',
         engine: 'ai',
         latencyMs: Math.max(1, Math.round(performance.now() - startedAt)),
@@ -387,8 +411,8 @@ export default function App() {
       setIsGenerating(false);
       setThinkingLabel(null);
     }
-            };
-  
+  };
+
   const handleSend = async (rawText?: string, overridePersona?: PersonaMode) => {
     if (isGenerating || isPreparingPhoto) return;
 
@@ -424,29 +448,28 @@ export default function App() {
     if (!rawText) setInput('');
     setVoiceNotice(null);
 
-    // Priority 1: Instant local replies ONLY for exact device time, date/day, and pure math
-    const deviceResult = runInstantDeviceCheck(text);
-    if (deviceResult.handled) {
+    const instantResult = runInstantDeviceCheck(text, currentPersona, currentUser);
+    if (instantResult) {
       const elapsed = Math.max(1, Math.round(performance.now() - startedAt));
-      const replyMsg: ChatMessage = {
+      const instantReply: ChatMessage = {
         id: `a-${Date.now() + 1}`,
         role: 'assistant',
-        text: deviceResult.reply,
+        text: instantResult.reply,
         persona: currentPersona,
         engine: 'instant',
         latencyMs: elapsed,
         timestamp: Date.now(),
       };
-      appendMessageToSession(targetSessionId, targetOwnerKey, replyMsg, currentPersona);
-      if (autoSpeak) speakMessage(replyMsg.text, replyMsg.id);
+      appendMessageToSession(targetSessionId, targetOwnerKey, instantReply, currentPersona);
+      if (autoSpeak) speakMessage(instantReply.text, instantReply.id);
       return;
     }
 
-    // Priority 2: Server-side Gemini AI with last 10 messages + image context, with seamless fallback
     setIsGenerating(true);
-    setThinkingLabel('Zenoa is thinking...');
+    setThinkingLabel('Thinking...');
+
     try {
-      let replyText: string | null = null;
+      let replyText = '';
       let usedAi = false;
 
       if (isOnline) {
@@ -455,16 +478,16 @@ export default function App() {
           history: nextHistory,
           persona: currentPersona,
         });
+
         if (aiResult.ok) {
           replyText = aiResult.reply;
           usedAi = true;
         }
       }
 
-        if (!replyText) {
-
-     replyText = 'Server is busy — please wait 3 seconds and send your message again!';
-        }
+      if (!replyText) {
+        replyText = 'Server is busy — please wait 3 seconds and send your message again!';
+      }
 
       const elapsed = Math.max(1, Math.round(performance.now() - startedAt));
       const replyMsg: ChatMessage = {
@@ -485,7 +508,7 @@ export default function App() {
   };
 
   const handleToggleMic = () => {
-    if (isListening) 
+    if (isListening) {
       recognitionRef.current?.stop();
       setIsListening(false);
       return;
@@ -503,12 +526,12 @@ export default function App() {
     }
 
     try {
-      const recognition = new SpeechRec();
-      recognition.lang = navigator.language || 'en-US';
-      recognition.interimResults = true;
-      recognition.continuous = false;
+      const speechRec = new SpeechRec();
+      speechRec.lang = navigator.language || 'en-US';
+      speechRec.interimResults = true;
+      speechRec.continuous = false;
 
-      recognition.onresult = (event) => {
+      speechRec.onresult = (event) => {
         let transcript = '';
         for (let i = 0; i < event.results.length; i++) {
           transcript += event.results[i][0].transcript;
@@ -516,21 +539,21 @@ export default function App() {
         setInput(transcript);
       };
 
-      recognition.onerror = (event) => {
+      speechRec.onerror = (event) => {
         setIsListening(false);
         if (event.error !== 'aborted') {
           setVoiceNotice(`Microphone paused (${event.error}). Check mic permission and try again.`);
         }
       };
 
-      recognition.onend = () => {
+      speechRec.onend = () => {
         setIsListening(false);
       };
 
-      recognitionRef.current = recognition;
+      recognitionRef.current = speechRec;
       setVoiceNotice(null);
       setIsListening(true);
-      recognition.start();
+      speechRec.start();
     } catch {
       setIsListening(false);
       setVoiceNotice('Unable to start microphone in this browser.');
@@ -542,7 +565,12 @@ export default function App() {
     setSpeakingMessageId(null);
     setPendingPhoto(null);
     setVoiceNotice(null);
-    setActiveSession(createFreshSession(currentUser, persona));
+    const fresh = createFreshSession(currentUser, persona);
+    setSessionsState((prev) => ({
+      ownerKey: prev.ownerKey,
+      sessions: [fresh, ...prev.sessions],
+    }));
+    setActiveSessionId(fresh.id);
   };
 
   const handleSelectSession = (sessionId: string) => {
@@ -553,59 +581,48 @@ export default function App() {
     setPendingPhoto(null);
     setVoiceNotice(null);
     setPersona(found.persona);
-    setActiveSession(found);
+    setActiveSessionId(found.id);
   };
 
   const handleDeleteSession = (sessionId: string) => {
     const remaining = sessionsState.sessions.filter((s) => s.id !== sessionId);
-    setSessionsState({
-      ownerKey: sessionsState.ownerKey,
-      sessions: remaining,
-    });
-    if (activeSession.id === sessionId) {
-      window.speechSynthesis?.cancel();
-      setSpeakingMessageId(null);
-      setPendingPhoto(null);
-      if (remaining.length > 0) {
-        setPersona(remaining[0].persona);
-        setActiveSession(remaining[0]);
-      } else {
-        setActiveSession(createFreshSession(currentUser, persona));
-      }
+    if (remaining.length === 0) {
+      const fresh = createFreshSession(currentUser, persona);
+      setSessionsState((prev) => ({ ownerKey: prev.ownerKey, sessions: [fresh] }));
+      setActiveSessionId(fresh.id);
+      return;
     }
-  };
-
-  const handleSaveCreator = (profile: CreatorProfile) => {
-    setCreatorProfile(profile);
-    try {
-      localStorage.setItem('zenoa_creator', JSON.stringify(profile));
-    } catch {
-      // ignore
+    setSessionsState((prev) => ({
+      ownerKey: prev.ownerKey,
+      sessions: remaining,
+    }));
+    if (activeSessionId === sessionId) {
+      setActiveSessionId(remaining[0].id);
+      setPersona(remaining[0].persona);
     }
   };
 
   const handleAuthenticated = (user: LocalUser) => {
+    const userKey = getSessionsStorageKey(user);
+    const userSessions = loadChatSessions(user);
     setCurrentUser(user);
-    const nextOwnerKey = getSessionsStorageKey(user);
-    const loaded = loadChatSessions(user);
-    setSessionsState({ ownerKey: nextOwnerKey, sessions: loaded });
-    if (loaded.length > 0) {
-      setPersona(loaded[0].persona);
-      setActiveSession(loaded[0]);
-    } else {
-      setActiveSession(createFreshSession(user, persona));
-    }
+    setSessionsState({ ownerKey: userKey, sessions: userSessions });
+    setActiveSessionId(userSessions[0].id);
+    setPersona(userSessions[0].persona);
   };
 
   const handleSaveProfile = (updates: { name: string; avatar: AvatarId }) => {
     const updated = updateActiveProfile(updates);
     if (updated) {
       setCurrentUser(updated);
-      setActiveSession((prev) =>
-        prev.messages.length === 1 && prev.messages[0].id.startsWith('welcome-')
-          ? { ...prev, messages: [createWelcomeMessage(updated, persona)] }
-          : prev,
-      );
+      setSessionsState((prev) => ({
+        ...prev,
+        sessions: prev.sessions.map((s, idx) =>
+          idx === 0 && s.messages.length === 1 && s.messages[0].id.startsWith('welcome-')
+            ? { ...s, messages: [createWelcomeMessage(updated, persona)] }
+            : s,
+        ),
+      }));
     }
   };
 
@@ -622,9 +639,11 @@ export default function App() {
     setSessionsState({ ownerKey: guestKey, sessions: guestSessions });
     if (guestSessions.length > 0) {
       setPersona(guestSessions[0].persona);
-      setActiveSession(guestSessions[0]);
+      setActiveSessionId(guestSessions[0].id);
     } else {
-      setActiveSession(createFreshSession(null, persona));
+      const fresh = createFreshSession(null, persona);
+      setSessionsState({ ownerKey: guestKey, sessions: [fresh] });
+      setActiveSessionId(fresh.id);
     }
   };
 
@@ -639,23 +658,24 @@ export default function App() {
     await deleteAccountAndAllData();
     setCreatorProfile(DEFAULT_CREATOR);
     setCurrentUser(null);
-    setSessionsState({ ownerKey: getSessionsStorageKey(null), sessions: [] });
-    setActiveSession(createFreshSession(null, persona));
+    const fresh = createFreshSession(null, persona);
+    setSessionsState({ ownerKey: getSessionsStorageKey(null), sessions: [fresh] });
+    setActiveSessionId(fresh.id);
   };
 
   return (
-    <div className="h-dvh flex flex-col bg-white text-slate-900 dark:bg-slate-950 dark:text-slate-100">
+    <div className="h-dvh flex bg-white text-slate-900 dark:bg-slate-950 dark:text-slate-100">
       {/* Clean Minimal Top Header with Hamburger History Toggle */}
-      <header className="shrink-0 sticky top-0 z-30 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-b border-indigo-100/80 dark:border-slate-800 px-3 sm:px-6 h-14 flex items-center justify-between gap-2 sm:gap-4">
+      <header className="shrink-0 sticky top-0 z-30 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-b border-slate-200 dark:border-slate-800 px-3 sm:px-5 h-14 flex items-center justify-between gap-2 fixed inset-x-0">
         <div className="flex items-center gap-2 sm:gap-2.5 min-w-0">
           <button
             type="button"
             onClick={() => setHistoryOpen(true)}
             aria-label="Open chat history"
             title="Chat History"
-            className="min-h-[40px] min-w-[40px] inline-flex items-center justify-center rounded-xl border border-indigo-100 dark:border-slate-700 bg-sky-50/50 dark:bg-slate-900 text-slate-700 dark:text-slate-200 hover:bg-sky-100/80 dark:hover:bg-slate-800 transition-colors shrink-0"
+            className="min-h-[40px] min-w-[40px] inline-flex items-center justify-center rounded-xl border border-indigo-200 dark:border-indigo-800 bg-indigo-50 dark:bg-indigo-950/70 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-900/70 transition cursor-pointer shrink-0"
           >
-            <Menu className="w-5 h-5 text-indigo-600 dark:text-sky-400" />
+            <Menu className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
           </button>
           <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-sky-500 to-indigo-600 text-white flex items-center justify-center font-bold text-base shadow-sm shrink-0">
             Z
@@ -673,7 +693,7 @@ export default function App() {
             onClick={() => setDarkMode((d) => !d)}
             aria-label={darkMode ? 'Switch to light theme' : 'Switch to dark theme'}
             title={darkMode ? 'Light mode' : 'Dark mode'}
-            className="min-h-[40px] min-w-[40px] inline-flex items-center justify-center rounded-xl border border-indigo-100 dark:border-slate-700 bg-sky-50/50 dark:bg-slate-900 text-slate-700 dark:text-slate-200 hover:bg-sky-100/80 dark:hover:bg-slate-800 transition-colors shrink-0"
+            className="min-h-[40px] min-w-[40px] inline-flex items-center justify-center rounded-xl border border-indigo-200 dark:border-indigo-800 bg-indigo-50 dark:bg-indigo-950/70 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-900/70 transition cursor-pointer"
           >
             {darkMode ? <Sun className="w-4 h-4 text-sky-400" /> : <Moon className="w-4 h-4 text-indigo-600" />}
           </button>
@@ -683,393 +703,260 @@ export default function App() {
             onClick={() => setSettingsOpen(true)}
             aria-label="Open settings"
             title="Settings"
-            className="min-h-[40px] min-w-[40px] inline-flex items-center justify-center rounded-xl border border-indigo-100 dark:border-slate-700 bg-sky-50/50 dark:bg-slate-900 text-slate-700 dark:text-slate-200 hover:bg-sky-100/80 dark:hover:bg-slate-800 transition-colors shrink-0"
+            className="min-h-[40px] min-w-[40px] inline-flex items-center justify-center rounded-xl border border-indigo-200 dark:border-indigo-800 bg-indigo-50 dark:bg-indigo-950/70 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-900/70 transition cursor-pointer"
           >
-            <Settings className="w-4 h-4 text-indigo-600 dark:text-sky-400" />
+            <Settings className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
           </button>
         </div>
       </header>
 
-      {/* Main Workspace */}
-      <div className="flex-1 min-h-0 max-w-6xl w-full mx-auto flex flex-col lg:flex-row gap-0 lg:gap-6 lg:px-6 lg:py-5">
-        {/* Desktop Sidebar Rail */}
-        <aside className="hidden lg:flex lg:w-72 shrink-0 flex-col gap-4">
-          <div className="rounded-3xl bg-gradient-to-br from-sky-50/90 to-indigo-50/70 dark:from-slate-900 dark:to-slate-900 border border-indigo-100/80 dark:border-slate-800 p-5">
-            <h1 className="text-lg font-bold text-slate-900 dark:text-white">
-              Your Free AI Friend in Every Language
-            </h1>
-            <p className="mt-1.5 text-xs leading-relaxed text-slate-600 dark:text-slate-400">
-              Write or speak in any language—Zenoa understands naturally. Runs privately with zero API keys or limits.
-            </p>
-          </div>
-
-          {/* Companion Mode Switch */}
-          <div className="rounded-2xl bg-white dark:bg-slate-900 border border-indigo-100/80 dark:border-slate-800 p-4">
-            <span className="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-2.5">
-              Companion Mode
-            </span>
-            <div className="grid grid-cols-2 gap-1 p-1 rounded-xl bg-sky-50/80 dark:bg-slate-950">
-              <button
-                type="button"
-                onClick={() => setPersona('friend')}
-                className={`min-h-[38px] inline-flex items-center justify-center gap-1.5 rounded-lg text-xs font-medium transition-colors whitespace-nowrap ${
-                  persona === 'friend'
-                    ? 'bg-white dark:bg-slate-800 text-indigo-700 dark:text-sky-300 shadow-sm'
-                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-                }`}
-              >
-                <HeartHandshake className="w-3.5 h-3.5 text-indigo-600 dark:text-sky-400" />
-                <span>Friend</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setPersona('study')}
-                className={`min-h-[38px] inline-flex items-center justify-center gap-1.5 rounded-lg text-xs font-medium transition-colors whitespace-nowrap ${
-                  persona === 'study'
-                    ? 'bg-white dark:bg-slate-800 text-indigo-700 dark:text-sky-300 shadow-sm'
-                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-                }`}
-              >
-                <BookOpen className="w-3.5 h-3.5 text-indigo-600 dark:text-sky-400" />
-                <span>Study Buddy</span>
-              </button>
-            </div>
-          </div>
-
-          {/* Photo Study Helper Card */}
-          <div className="rounded-2xl bg-white dark:bg-slate-900 border border-indigo-100/80 dark:border-slate-800 p-4">
-            <div className="flex items-center gap-2 text-xs font-semibold text-slate-900 dark:text-white">
-              <Sparkles className="w-4 h-4 text-indigo-600 dark:text-sky-400" />
-              <span>Photo Study Helper</span>
-            </div>
-            <p className="mt-1.5 text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
-              Tap <strong>+</strong> next to Message Zenoa to snap or upload a textbook question—Zenoa reads and solves it clearly in your language.
-            </p>
-          </div>
-
-          {/* Quick Actions */}
-          <div className="rounded-2xl bg-white dark:bg-slate-900 border border-indigo-100/80 dark:border-slate-800 p-2.5 space-y-1">
+      {/* Main Column */}
+      <div className="flex-1 flex flex-col min-w-0 pt-14">
+        {/* Top Sub-bar: Mode Switcher + Status */}
+        <div className="shrink-0 border-b border-slate-200/80 dark:border-slate-800/80 bg-slate-50/80 dark:bg-slate-900/60 px-3 sm:px-5 py-2 flex items-center justify-between gap-2 flex-wrap">
+          <div className="inline-flex rounded-xl bg-slate-200/80 dark:bg-slate-800 p-1 gap-1">
             <button
               type="button"
-              onClick={handleNewChat}
-              className="w-full min-h-[42px] flex items-center gap-2.5 rounded-xl px-3 py-2 text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-sky-50 dark:hover:bg-slate-800 transition-colors"
+              onClick={() => handleSelectPersona('friend')}
+              className={`min-h-[34px] px-3 rounded-lg text-xs font-semibold inline-flex items-center gap-1.5 transition cursor-pointer ${
+                persona === 'friend'
+                  ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-300 shadow-xs'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+              }`}
             >
-              <Plus className="w-4 h-4 text-indigo-600 dark:text-sky-400" />
-              <span>New Chat</span>
+              <HeartHandshake className="w-3.5 h-3.5" />
+              Friend
             </button>
             <button
               type="button"
-              onClick={() => setHistoryOpen(true)}
-              className="w-full min-h-[42px] flex items-center justify-between gap-2 rounded-xl px-3 py-2 text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-sky-50 dark:hover:bg-slate-800 transition-colors"
+              onClick={() => handleSelectPersona('study')}
+              className={`min-h-[34px] px-3 rounded-lg text-xs font-semibold inline-flex items-center gap-1.5 transition cursor-pointer ${
+                persona === 'study'
+                  ? 'bg-white dark:bg-slate-900 text-sky-600 dark:text-sky-300 shadow-xs'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+              }`}
             >
-              <span className="inline-flex items-center gap-2.5">
-                <History className="w-4 h-4 text-indigo-600 dark:text-sky-400" />
-                <span>Chat History</span>
+              <BookOpen className="w-3.5 h-3.5" />
+              Study Buddy
+            </button>
+          </div>
+
+          <div className="flex items-center gap-2">
+            {!isOnline && (
+              <span className="inline-flex items-center gap-1 text-xs font-medium text-amber-700 dark:text-amber-300 bg-amber-100 dark:bg-amber-950/60 px-2.5 py-1 rounded-full">
+                <WifiOff className="w-3 h-3" /> Offline
               </span>
-              {sessionsState.sessions.length > 0 && (
-                <span className="text-[11px] font-mono tabular-nums text-slate-500 dark:text-slate-400">
-                  {sessionsState.sessions.length}
-                </span>
-              )}
-            </button>
-            <button
-              type="button"
-              onClick={() => setSettingsOpen(true)}
-              className="w-full min-h-[42px] flex items-center gap-2.5 rounded-xl px-3 py-2 text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-sky-50 dark:hover:bg-slate-800 transition-colors"
-            >
-              <Settings className="w-4 h-4 text-indigo-600 dark:text-sky-400" />
-              <span>Account, About &amp; Safety</span>
-            </button>
-          </div>
-        </aside>
-
-        {/* Main Chat Panel */}
-        <section className="flex-1 min-h-0 flex flex-col bg-white lg:rounded-3xl dark:bg-slate-900 lg:border lg:border-indigo-100/80 lg:dark:border-slate-800 lg:shadow-sm overflow-hidden">
-          {/* Mobile Compact Mode Strip */}
-          <div className="lg:hidden shrink-0 border-b border-indigo-100/70 dark:border-slate-800 bg-sky-50/40 dark:bg-slate-900/70 px-3 py-2 flex items-center justify-between gap-2">
-            <div className="flex items-center gap-1 p-0.5 rounded-xl bg-white dark:bg-slate-950 border border-indigo-100/80 dark:border-slate-800 shrink-0">
-              <button
-                type="button"
-                onClick={() => setPersona('friend')}
-                className={`min-h-[34px] px-3 py-1 rounded-lg text-xs font-medium whitespace-nowrap transition-colors ${
-                  persona === 'friend'
-                    ? 'bg-indigo-600 text-white shadow-sm'
-                    : 'text-slate-600 dark:text-slate-400'
-                }`}
-              >
-                Friend
-              </button>
-              <button
-                type="button"
-                onClick={() => setPersona('study')}
-                className={`min-h-[34px] px-3 py-1 rounded-lg text-xs font-medium whitespace-nowrap transition-colors ${
-                  persona === 'study'
-                    ? 'bg-indigo-600 text-white shadow-sm'
-                    : 'text-slate-600 dark:text-slate-400'
-                }`}
-              >
-                Study Buddy
-              </button>
-            </div>
-
+            )}
             <button
               type="button"
               onClick={handleNewChat}
-              className="min-h-[34px] inline-flex items-center gap-1.5 px-3 py-1 rounded-xl border border-indigo-100 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-sky-50 dark:hover:bg-slate-800 whitespace-nowrap"
+              className="min-h-[34px] px-2.5 rounded-lg text-xs font-semibold inline-flex items-center gap-1 border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
             >
-              <Plus className="w-3.5 h-3.5 text-indigo-600 dark:text-sky-400" />
-              <span>New Chat</span>
+              <Plus className="w-3.5 h-3.5" /> New Chat
             </button>
           </div>
+        </div>
 
-          {/* Scrollable Messages */}
-          <div className="flex-1 overflow-y-auto px-4 sm:px-6 py-5 space-y-5">
+        {/* Messages Feed */}
+        <main className="flex-1 overflow-y-auto px-3 sm:px-6 py-4 space-y-4">
+          <div className="max-w-3xl mx-auto space-y-4">
             {messages.map((msg) => {
-              const isAssistant = msg.role === 'assistant';
-              const isSpeakingThis = speakingMessageId === msg.id;
-
+              const isUser = msg.role === 'user';
               return (
                 <div
                   key={msg.id}
-                  className={`flex flex-col ${isAssistant ? 'items-start' : 'items-end'}`}
+                  className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}
                 >
                   <div
-                    dir="auto"
-                    className={`max-w-[88%] sm:max-w-[78%] rounded-2xl px-4 py-3 text-[15px] leading-relaxed ${
-                      isAssistant
-                        ? 'bg-sky-50/75 dark:bg-slate-800/85 border border-indigo-100/70 dark:border-slate-700/60 text-slate-900 dark:text-slate-100'
-                        : 'bg-gradient-to-br from-sky-500 to-indigo-600 text-white shadow-sm'
+                    className={`max-w-[88%] sm:max-w-[78%] rounded-2xl px-4 py-3 text-sm leading-relaxed shadow-xs ${
+                      isUser
+                        ? 'bg-gradient-to-br from-sky-600 to-indigo-600 text-white rounded-br-sm'
+                        : 'bg-slate-100 dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 text-slate-800 dark:text-slate-100 rounded-bl-sm'
                     }`}
                   >
                     {msg.imageDataUrl && (
                       <img
                         src={msg.imageDataUrl}
-                        alt="Uploaded study question"
-                        className={`max-h-60 w-auto max-w-full rounded-xl object-contain bg-white/95 border border-white/25 ${
-                          msg.text ? 'mb-2.5' : ''
-                        }`}
+                        alt="Uploaded study attachment"
+                        className="mb-2.5 max-h-56 rounded-xl border border-white/20 object-contain"
                       />
                     )}
-                    {msg.text && <MessageContent text={msg.text} isAssistant={isAssistant} />}
-                  </div>
+                    <MessageContent text={msg.text} isUser={isUser} />
 
-                  {/* Clean unboxed inline metadata without false language guesses */}
-                  {isAssistant && (
-                    <div className="mt-1.5 px-1 flex items-center gap-2 text-[11px] text-slate-500 dark:text-slate-400">
-                      <span>{msg.persona === 'study' ? 'Study Buddy' : 'Caring Friend'}</span>
-                      {typeof msg.latencyMs === 'number' && (
-                        <>
-                          <span aria-hidden="true">·</span>
-                          <span className="font-mono tabular-nums">{msg.latencyMs}ms</span>
-                        </>
-                      )}
-                      <span aria-hidden="true">·</span>
-                      <button
-                        type="button"
-                        onClick={() => speakMessage(msg.text, msg.id)}
-                        className="inline-flex items-center gap-1 hover:text-indigo-600 dark:hover:text-sky-300 transition-colors"
-                      >
-                        {isSpeakingThis ? (
-                          <>
-                            <VolumeX className="w-3 h-3" />
-                            <span>Stop</span>
-                          </>
-                        ) : (
-                          <>
-                            <Volume2 className="w-3 h-3" />
-                            <span>Speak</span>
-                          </>
-                        )}
-                      </button>
-                    </div>
-                  )}
+                    {!isUser && (
+                      <div className="mt-2 pt-2 border-t border-slate-200/70 dark:border-slate-800 flex items-center justify-between gap-2 text-[11px] text-slate-500 dark:text-slate-400">
+                        <span className="inline-flex items-center gap-1">
+                          <Sparkles className="w-3 h-3 text-indigo-500" />
+                          Zenoa AI
+                          {typeof msg.latencyMs === 'number' ? ` · ${msg.latencyMs}ms` : ''}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => speakMessage(msg.text, msg.id)}
+                          aria-label={speakingMessageId === msg.id ? 'Stop speaking' : 'Listen to reply'}
+                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md hover:bg-slate-200/70 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 transition cursor-pointer"
+                        >
+                          {speakingMessageId === msg.id ? (
+                            <>
+                              <VolumeX className="w-3.5 h-3.5 text-rose-500" /> Stop
+                            </>
+                          ) : (
+                            <>
+                              <Volume2 className="w-3.5 h-3.5" /> Listen
+                            </>
+                          )}
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 </div>
               );
             })}
 
             {isGenerating && (
-              <div className="flex items-start">
-                <div className="inline-flex items-center gap-2.5 rounded-2xl bg-sky-50/80 dark:bg-slate-800 border border-indigo-100/70 dark:border-slate-700 px-4 py-3 text-sm text-indigo-700 dark:text-sky-200">
-                  <Loader2 className="w-4 h-4 animate-spin text-indigo-600 dark:text-sky-400 shrink-0" />
-                  <span>{thinkingLabel ?? 'Zenoa is thinking...'}</span>
+              <div className="flex justify-start">
+                <div className="rounded-2xl rounded-bl-sm px-4 py-3 bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-sm text-slate-600 dark:text-slate-300 inline-flex items-center gap-2">
+                  <Loader2 className="w-4 h-4 animate-spin text-indigo-500" />
+                  <span>{thinkingLabel || 'Thinking...'}</span>
                 </div>
               </div>
             )}
 
-            <div ref={chatEndRef} />
+            <div ref={messagesEndRef} />
           </div>
+        </main>
 
-          {/* Voice / Photo Error Notice */}
-          {voiceNotice && (
-            <div className="px-4 sm:px-6 py-2 text-xs text-amber-800 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/40 border-t border-amber-200 dark:border-amber-900 flex items-center justify-between gap-2">
-              <span>{voiceNotice}</span>
-              <button
-                type="button"
-                onClick={() => setVoiceNotice(null)}
-                aria-label="Dismiss notice"
-                className="p-1 rounded-lg hover:bg-amber-100 dark:hover:bg-amber-900/50"
-              >
-                <X className="w-3.5 h-3.5" />
-              </button>
-            </div>
-          )}
-
-          {/* Pending Study Photo Preview */}
-          {(pendingPhoto || isPreparingPhoto) && (
-            <div className="px-3 sm:px-5 py-2.5 bg-sky-50/70 dark:bg-slate-950/70 border-t border-indigo-100/80 dark:border-slate-800 flex items-center justify-between gap-3">
-              <div className="flex items-center gap-3 min-w-0">
-                {pendingPhoto ? (
-                  <img
-                    src={pendingPhoto}
-                    alt="Study question preview"
-                    className="w-12 h-12 rounded-xl object-cover border border-indigo-200 dark:border-slate-700 bg-white shrink-0"
-                  />
-                ) : (
-                  <div className="w-12 h-12 rounded-xl border border-indigo-200 dark:border-slate-700 bg-white dark:bg-slate-900 flex items-center justify-center shrink-0">
-                    <ImagePlus className="w-5 h-5 text-indigo-500" />
-                  </div>
-                )}
-                <div className="min-w-0">
-                  <p className="text-xs font-semibold text-indigo-950 dark:text-sky-100 truncate">
-                    {isPreparingPhoto ? 'Preparing study photo…' : 'Study photo attached'}
-                  </p>
-                  <p className="text-[11px] text-slate-600 dark:text-slate-400 truncate">
-                    Tap Send or add your question in any language
-                  </p>
-                </div>
+        {/* Bottom Composer */}
+        <footer className="shrink-0 border-t border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 px-3 sm:px-6 py-3">
+          <div className="max-w-3xl mx-auto space-y-2">
+            {voiceNotice && (
+              <div className="text-xs text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/50 border border-amber-200 dark:border-amber-800 rounded-xl px-3 py-2 flex items-center justify-between gap-2">
+                <span>{voiceNotice}</span>
+                <button
+                  type="button"
+                  onClick={() => setVoiceNotice(null)}
+                  className="text-amber-700 dark:text-amber-300 hover:opacity-75 cursor-pointer"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
               </div>
-              {pendingPhoto && (
+            )}
+
+            {pendingPhoto && (
+              <div className="inline-flex items-center gap-2 bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-1.5 pr-2.5">
+                <img
+                  src={pendingPhoto}
+                  alt="Selected preview"
+                  className="w-11 h-11 rounded-lg object-cover"
+                />
+                <span className="text-xs font-medium text-slate-700 dark:text-slate-300">
+                  Photo ready — ask your question or press Send
+                </span>
                 <button
                   type="button"
                   onClick={() => setPendingPhoto(null)}
-                  aria-label="Remove attached photo"
-                  className="min-h-[36px] min-w-[36px] flex items-center justify-center rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 hover:bg-rose-50 hover:text-rose-600 transition-colors shrink-0"
+                  aria-label="Remove photo"
+                  className="p-1 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-800 text-slate-500 cursor-pointer"
                 >
-                  <X className="w-4 h-4" />
+                  <X className="w-3.5 h-3.5" />
                 </button>
-              )}
-            </div>
-          )}
+              </div>
+            )}
 
-          {/* Hidden Camera & Gallery File Inputs */}
-          <input
-            ref={cameraInputRef}
-            type="file"
-            accept="image/*"
-            capture="environment"
-            onChange={handlePhotoSelected}
-            className="hidden"
-          />
-          <input
-            ref={galleryInputRef}
-            type="file"
-            accept="image/*"
-            onChange={handlePhotoSelected}
-            className="hidden"
-          />
-
-          {/* Composer Footer */}
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              handleSend();
-            }}
-            className="shrink-0 border-t border-indigo-100/80 dark:border-slate-800 bg-white dark:bg-slate-900 px-3 sm:px-5 py-3 flex items-center gap-2"
-          >
-            {/* Photo Study "+" Upload Button & Popover */}
-            <div ref={photoMenuRef} className="relative shrink-0">
-              {photoMenuOpen && (
-                <div
-                  role="menu"
-                  aria-label="Upload study photo"
-                  className="absolute bottom-14 left-0 z-40 w-52 rounded-2xl bg-white dark:bg-slate-900 border border-indigo-100 dark:border-slate-700 shadow-xl p-1.5 space-y-1"
-                >
-                  <button
-                    type="button"
-                    role="menuitem"
-                    onClick={() => cameraInputRef.current?.click()}
-                    className="w-full min-h-[44px] flex items-center gap-2.5 rounded-xl px-3 py-2 text-xs font-medium text-slate-800 dark:text-slate-100 hover:bg-sky-50 dark:hover:bg-slate-800 transition-colors"
-                  >
-                    <Camera className="w-4 h-4 text-indigo-600 dark:text-sky-400" />
-                    <span>Take Photo (Camera)</span>
-                  </button>
-                  <button
-                    type="button"
-                    role="menuitem"
-                    onClick={() => galleryInputRef.current?.click()}
-                    className="w-full min-h-[44px] flex items-center gap-2.5 rounded-xl px-3 py-2 text-xs font-medium text-slate-800 dark:text-slate-100 hover:bg-sky-50 dark:hover:bg-slate-800 transition-colors"
-                  >
-                    <ImagePlus className="w-4 h-4 text-indigo-600 dark:text-sky-400" />
-                    <span>Upload Image (Gallery)</span>
-                  </button>
-                </div>
-              )}
+            <div className="flex items-end gap-2 bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-2">
+              <input
+                ref={cameraInputRef}
+                type="file"
+                accept="image/*"
+                capture="environment"
+                onChange={handlePhotoFilePicked}
+                className="hidden"
+              />
+              <input
+                ref={galleryInputRef}
+                type="file"
+                accept="image/*"
+                onChange={handlePhotoFilePicked}
+                className="hidden"
+              />
 
               <button
                 type="button"
-                onClick={() => setPhotoMenuOpen((open) => !open)}
-                aria-label="Add study photo or camera image"
-                aria-expanded={photoMenuOpen}
-                title="Upload Question Photo"
-                className={`min-h-[44px] min-w-[44px] inline-flex items-center justify-center rounded-xl border transition-colors ${
-                  photoMenuOpen || pendingPhoto
-                    ? 'bg-indigo-50 border-indigo-400 text-indigo-700 dark:bg-indigo-950/70 dark:border-sky-500/60 dark:text-sky-300'
-                    : 'border-indigo-100 dark:border-slate-700 bg-sky-50/50 dark:bg-slate-950 text-indigo-600 dark:text-sky-400 hover:bg-sky-100/80 dark:hover:bg-slate-800'
+                onClick={() => cameraInputRef.current?.click()}
+                disabled={isGenerating || isPreparingPhoto}
+                title="Take Photo"
+                aria-label="Take Photo"
+                className="min-h-[40px] min-w-[40px] inline-flex items-center justify-center rounded-xl text-slate-600 dark:text-slate-300 hover:bg-slate-200/80 dark:hover:bg-slate-800 transition cursor-pointer shrink-0"
+              >
+                <Camera className="w-5 h-5" />
+              </button>
+
+              <button
+                type="button"
+                onClick={() => galleryInputRef.current?.click()}
+                disabled={isGenerating || isPreparingPhoto}
+                title="Upload Image"
+                aria-label="Upload Image"
+                className="min-h-[40px] min-w-[40px] inline-flex items-center justify-center rounded-xl text-slate-600 dark:text-slate-300 hover:bg-slate-200/80 dark:hover:bg-slate-800 transition cursor-pointer shrink-0"
+              >
+                <ImagePlus className="w-5 h-5" />
+              </button>
+
+              <textarea
+                ref={textareaRef}
+                rows={1}
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    void handleSend();
+                  }
+                }}
+                placeholder={
+                  pendingPhoto
+                    ? 'Ask about this photo...'
+                    : persona === 'study'
+                      ? 'Ask any study question in Bangla, Hindi, or English...'
+                      : 'Message Zenoa...'
+                }
+                className="flex-1 bg-transparent resize-none border-0 focus:outline-none text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 py-2 px-1 max-h-[130px]"
+              />
+
+              <button
+                type="button"
+                onClick={handleToggleMic}
+                title={isListening ? 'Stop listening' : 'Voice input'}
+                aria-label={isListening ? 'Stop listening' : 'Voice input'}
+                className={`min-h-[40px] min-w-[40px] inline-flex items-center justify-center rounded-xl transition cursor-pointer shrink-0 ${
+                  isListening
+                    ? 'bg-rose-500 text-white animate-pulse'
+                    : 'text-slate-600 dark:text-slate-300 hover:bg-slate-200/80 dark:hover:bg-slate-800'
                 }`}
               >
-                <Plus className="w-5 h-5" />
+                {isListening ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => void handleSend()}
+                disabled={isGenerating || isPreparingPhoto || (!input.trim() && !pendingPhoto)}
+                title="Send message"
+                aria-label="Send message"
+                className="min-h-[40px] min-w-[40px] inline-flex items-center justify-center rounded-xl bg-gradient-to-br from-sky-500 to-indigo-600 text-white disabled:opacity-40 hover:opacity-95 transition cursor-pointer shrink-0 shadow-xs"
+              >
+                <Send className="w-4 h-4" />
               </button>
             </div>
-
-            <button
-              type="button"
-              onClick={handleToggleMic}
-              aria-label={isListening ? 'Stop voice input' : 'Speak in any language'}
-              title={isListening ? 'Listening… tap to stop' : 'Speak with Voice'}
-              className={`min-h-[44px] min-w-[44px] shrink-0 inline-flex items-center justify-center rounded-xl border transition-colors ${
-                isListening
-                  ? 'bg-rose-600 border-rose-600 text-white'
-                  : 'border-indigo-100 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-sky-50 dark:hover:bg-slate-800'
-              }`}
-            >
-              {isListening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
-            </button>
-
-            <input
-              type="text"
-              dir="auto"
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              placeholder="Message Zenoa"
-              className="flex-1 min-w-0 min-h-[44px] rounded-xl border border-indigo-100 dark:border-slate-700 bg-sky-50/40 dark:bg-slate-950 px-3.5 text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-            />
-
-            <button
-              type="submit"
-              disabled={(!input.trim() && !pendingPhoto) || isGenerating || isPreparingPhoto}
-              aria-label="Send message"
-              className="min-h-[44px] min-w-[44px] sm:px-4 shrink-0 inline-flex items-center justify-center gap-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-sm font-medium transition-colors"
-            >
-              <Send className="w-4 h-4" />
-              <span className="hidden sm:inline">Send</span>
-            </button>
-          </form>
-        </section>
+          </div>
+        </footer>
       </div>
 
-      {/* Offline Status Toast */}
-      {!isOnline && (
-        <div className="fixed bottom-20 left-4 z-40 flex items-center gap-2 rounded-xl bg-amber-600 px-3 py-2 text-xs font-medium text-white shadow-lg">
-          <WifiOff className="w-3.5 h-3.5" />
-          <span>Offline Mode — Time, Date &amp; Math available</span>
-        </div>
-      )}
-
-      {/* Chat History Slide-Over Drawer */}
+      {/* Slide-out Chat History Drawer */}
       <ChatHistorySidebar
         isOpen={historyOpen}
         onClose={() => setHistoryOpen(false)}
-        sessions={sessionsState.sessions}
+        sessions={sessions}
         activeSessionId={activeSession.id}
         onSelectSession={handleSelectSession}
         onNewChat={handleNewChat}
@@ -1084,7 +971,7 @@ export default function App() {
         darkMode={darkMode}
         onToggleTheme={() => setDarkMode((d) => !d)}
         persona={persona}
-        onChangePersona={setPersona}
+        onChangePersona={handleSelectPersona}
         onAuthenticated={handleAuthenticated}
         onSaveProfile={handleSaveProfile}
         onLogout={handleLogout}
@@ -1114,4 +1001,4 @@ export default function App() {
       />
     </div>
   );
-
+}
