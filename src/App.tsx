@@ -403,15 +403,15 @@ export default function App() {
         persona: 'study',
         engine: 'ai',
         latencyMs: Math.max(1, Math.round(performance.now() - startedAt)),
-        timestamp: Date.now(),
-      };
-      appendMessageToSession(targetSessionId, targetOwnerKey, replyMsg, 'study');
-      if (autoSpeak) speakMessage(replyMsg.text, replyMsg.id);
-    } finally {
-      setIsGenerating(false);
-      setThinkingLabel(null);
-    }
-  };
+          timestamp: Date.now(),
+    };
+    appendMessageToSession(targetSessionId, targetOwnerKey, replyMsg, 'study');
+    if (autoSpeak) speakMessage(replyMsg.text, replyMsg.id);
+  } finally {
+    setIsGenerating(false);
+    setThinkingLabel(null);
+  }
+};
 
   const handleSend = async (rawText?: string, overridePersona?: PersonaMode) => {
     if (isGenerating || isPreparingPhoto) return;
@@ -446,15 +446,19 @@ export default function App() {
     const nextHistory = [...messages, userMsg];
     appendMessageToSession(targetSessionId, targetOwnerKey, userMsg, currentPersona);
     if (!rawText) setInput('');
-    setVoiceNotice(null);
+    
 
     const instantResult = runInstantDeviceCheck(text, currentPersona, currentUser);
-    if (instantResult) {
+    const instantText =
+      typeof instantResult === 'string'
+        ? instantResult
+        : (instantResult as any)?.text || (instantResult as any)?.reply || '';
+    if (instantText) {
       const elapsed = Math.max(1, Math.round(performance.now() - startedAt));
       const instantReply: ChatMessage = {
         id: `a-${Date.now() + 1}`,
         role: 'assistant',
-        text: instantResult.reply,
+        text: instantText,
         persona: currentPersona,
         engine: 'instant',
         latencyMs: elapsed,
@@ -464,7 +468,6 @@ export default function App() {
       if (autoSpeak) speakMessage(instantReply.text, instantReply.id);
       return;
     }
-
     setIsGenerating(true);
     setThinkingLabel('Thinking...');
 
