@@ -40,7 +40,8 @@ export default async function handler(req: IncomingMessage & { body?: any }, res
     if (userMessage) parts.push({ text: userMessage });
 
     const response = await ai.models.generateContent({
-      model: 'gemini-3.0-flash',
+    model: 'gemini-3.8-flash',
+
       contents: [{ role: 'user', parts }],
       config: {
         systemInstruction: 'You are Zenoa, a helpful, smart AI assistant created by a Class 9 student from West Bengal, India. Answer accurately in the user language (Bengali, Banglish, or English). Use Google Search for live facts.',
