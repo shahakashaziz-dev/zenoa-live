@@ -68,7 +68,8 @@ export default async function handler(req: IncomingMessage & { body?: any }, res
         : 'You are in Friend mode: be warm, supportive, smart, and helpful like a best friend.',
     ].join(' ');
 
-    const models = new Array('gemini-3.8-flash', 'gemini-3.5-flash-lite');
+    const models = new Array('gemini-3.5-flash-lite', 'gemini-3.8-flash');
+
     let reply = '';
 
     for (let attempt = 0; attempt < 3 && !reply; attempt++) {
