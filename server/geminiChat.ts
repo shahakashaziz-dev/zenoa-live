@@ -2,6 +2,7 @@ import { GoogleGenAI, ThinkingLevel, type Content, type Part } from '@google/gen
 
 const GEMINI_MODEL = 'gemini-2.5-flash';
 
+
 export interface IncomingHistoryItem {
   role: 'user' | 'assistant';
   text?: string;
@@ -168,9 +169,11 @@ async function generateWithRetry(
   systemInstruction: string,
 ): Promise<string> {
   const attempts: Array<{ model: string; useLowThinking: boolean; useSearch: boolean }> = [
-    { model: GEMINI_MODEL, useLowThinking: true, useSearch: true },
-    { model: GEMINI_MODEL, useLowThinking: false, useSearch: true },
-    { model: GEMINI_MODEL, useLowThinking: false, useSearch: false },
+    
+      { model: 'gemini-2.5-flash', useLowThinking: false, useSearch: true },
+    { model: 'gemini-2.5-flash-lite', useLowThinking: false, useSearch: false },
+    { model: 'gemini-2.0-flash', useLowThinking: false, useSearch: false },
+
   ];
   let lastErr: unknown;
 
