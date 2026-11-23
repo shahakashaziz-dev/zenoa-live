@@ -372,46 +372,12 @@ export default function App() {
         }
       }
 
-      // Seamless fallback: Browser-side Tesseract OCR + local math / Wikipedia helper
-      setThinkingLabel('Reading image...');
-      let extractedText = '';
-      try {
-        extractedText = await extractTextFromStudyPhoto(photoDataUrl, undefined, () => {
-          setThinkingLabel('Reading image...');
-        });
-      } catch {
-        extractedText = '';
-      }
-
-      setThinkingLabel('Zenoa is thinking...');
-
-      if (!isOnline && extractedText) {
-        const instantMath = runInstantDeviceCheck(extractedText);
-        if (instantMath.handled) {
-          const replyMsg: ChatMessage = {
-            id: `a-${Date.now() + 1}`,
-            role: 'assistant',
-            text: instantMath.reply,
-            ocrText: extractedText,
-            persona: 'study',
-            engine: 'instant',
-            latencyMs: Math.max(1, Math.round(performance.now() - startedAt)),
-            timestamp: Date.now(),
-          };
-          appendMessageToSession(targetSessionId, targetOwnerKey, replyMsg, 'study');
-          if (autoSpeak) speakMessage(replyMsg.text, replyMsg.id);
-          return;
-        }
-      }
-
-      const replyText = await answerPhotoStudyLocally(extractedText, typedText);
-      const replyMsg: ChatMessage = {
+        const replyMsg: ChatMessage = {
         id: `a-${Date.now() + 1}`,
         role: 'assistant',
-        text: replyText,
-        ocrText: extractedText || undefined,
+        text: 'Sorry, server is busy right now. Please wait 3 seconds and send the photo again!',
         persona: 'study',
-        engine: 'instant',
+        engine: 'ai',
         latencyMs: Math.max(1, Math.round(performance.now() - startedAt)),
         timestamp: Date.now(),
       };
@@ -421,7 +387,8 @@ export default function App() {
       setIsGenerating(false);
       setThinkingLabel(null);
     }
-  };
+
+    }
 
   const handleSend = async (rawText?: string, overridePersona?: PersonaMode) => {
     if (isGenerating || isPreparingPhoto) return;
@@ -495,8 +462,11 @@ export default function App() {
         }
       }
 
-      if (!replyText) {
-        replyText = await answerWithKnowledgeAndNewsEngine(text, nextHistory, currentPersona);
+        if (!replyText) {
+
+     replyText = 'Server is busy — please wait 3 seconds and send your message again!';
+   }
+  }
       }
 
       const elapsed = Math.max(1, Math.round(performance.now() - startedAt));
@@ -518,7 +488,7 @@ export default function App() {
   };
 
   const handleToggleMic = () => {
-    if (isListening) {
+    if (isListening) 
       recognitionRef.current?.stop();
       setIsListening(false);
       return;
