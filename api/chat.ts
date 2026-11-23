@@ -1,5 +1,5 @@
 import type { IncomingMessage, ServerResponse } from 'http';
-import { processGeminiChat, type ChatRequestBody } from '../server/geminiChat.ts';
+import { processGeminiChat, type ChatRequestBody } from '../server/geminiChat';
 
 const MAX_BODY_BYTES = 12 * 1024 * 1024;
 
