@@ -388,8 +388,7 @@ export default function App() {
       setThinkingLabel(null);
     }
 
-    }
-
+  
   const handleSend = async (rawText?: string, overridePersona?: PersonaMode) => {
     if (isGenerating || isPreparingPhoto) return;
 
@@ -1115,3 +1114,4 @@ export default function App() {
       />
     </div>
   );
+}
