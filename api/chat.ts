@@ -51,7 +51,8 @@ export default async function handler(req: IncomingMessage & { body?: any }, res
     const reply = response.text?.trim() || 'Sorry, no response generated.';
     res.statusCode = 200;
     res.end(JSON.stringify({ ok: true, reply }));
-  } catch (err: any) {
+  } catch (err: any) {console.error('REAL_GEMINI_ERR:', err?.message || err);
+
     res.statusCode = 502;
     res.end(JSON.stringify({ ok: false, errorCode: 'GEMINI_ERROR', message: String(err?.message || err) }));
   }
