@@ -89,29 +89,29 @@ function cleanTextForSpeech(text: string): string {
     .replace(/^#+\s*/gm, '')
     .replace(/^[•\-*]\s+/gm, '')
     .replace(/\n+/g, '. ')
+                 
     .trim();
 }
 
 function checkLiveTimeOrLocation(text: string, locationLabel: string): string | null {
+
   const q = text.toLowerCase().trim();
   const asksTime =
-    /\b(time|shomoy|somoy|koyta|koita|kota baje|koto baje|bajche|bajlo|clock|tarikh|date|ajke ki bar|ki bar)\b/.test(
+    /\b(ekhon koyta|ekhon koita|ekhon kota baje|koyta baje|koita baje|what time|current time|ajker tarikh|today date)\b/.test(
       q,
     );
   const asksLocation =
-    /\b(location|kothay|kothai|where am i|amar jayga|amar location|city|district|address)\b/.test(
-      q,
-    );
+    /\b(amar location|my location|where am i|ami kothay achi|ami kothai achi)\b/.test(q);
 
   if (asksTime) {
     const now = new Date();
-    const timeStr = now.toLocaleTimeString('en-IN', {
+    const timeStr = now.toLocaleTimeString([], {
       hour: '2-digit',
       minute: '2-digit',
       second: '2-digit',
       hour12: true,
     });
-    const dateStr = now.toLocaleDateString('en-IN', {
+    const dateStr = now.toLocaleDateString([], {
       weekday: 'long',
       day: 'numeric',
       month: 'long',
@@ -126,6 +126,7 @@ function checkLiveTimeOrLocation(text: string, locationLabel: string): string | 
 
   return null;
 }
+
 
 export default function App() {
   const isOnline = useOnlineStatus();
@@ -161,7 +162,10 @@ export default function App() {
   const [liveClock, setLiveClock] = useState<string>(() =>
     new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true }),
   );
-  const [liveLocation, setLiveLocation] = useState<string>('West Bengal, India');
+  const [liveLocation, setLiveLocation] = useState<string>(() =>
+  Intl.DateTimeFormat().resolvedOptions().timeZone.replace('_', ' '),
+);
+
 
   const [sessionsState, setSessionsState] = useState<{
     ownerKey: string;
