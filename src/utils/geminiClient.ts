@@ -3,7 +3,7 @@ import { ChatMessage, PersonaMode } from '../types/zenoa';
 import { enhanceReplyWithSmartLinks } from './smartLinks';
 
 const SERVER_CHAT_TIMEOUT_MS = 25000;
-const GEMINI_MODEL = 'gemini-4-hydrogen';
+const GEMINI_MODEL = 'gemini-2.5-flash';
 
 export interface ServerChatParams {
   userMessage: string;
@@ -98,10 +98,10 @@ async function askViaVitePublicKeyFallback(
     ].join(' ');
 
     const attempts: Array<{ model: string; useLowThinking: boolean; useSearch: boolean }> = [
-      { model: GEMINI_MODEL, useLowThinking: true, useSearch: true },
-      { model: 'gemini-3.1-flash-lite', useLowThinking: false, useSearch: true },
-      { model: GEMINI_MODEL, useLowThinking: true, useSearch: false },
-      { model: 'gemini-3.1-flash-lite', useLowThinking: false, useSearch: false },
+      { model: GEMINI_MODEL, useLowThinking: false, useSearch: true },
+      
+      
+      { model: GEMINI_MODEL, useLowThinking: false, useSearch: false },
     ];
 
     for (const target of attempts) {
