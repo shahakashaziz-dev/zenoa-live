@@ -18,8 +18,8 @@ export default defineConfig(() => {
         includeAssets: ['icon.svg', 'apple-touch-icon.png', 'pwa-192x192.png', 'pwa-512x512.png', 'pwa-maskable-512x512.png'],
         manifest: {
           id: '/',
-          name: 'Zenoa — Your Free AI Friend in Every Language',
-          short_name: 'Zenoa',
+          name: 'Zevraq — Your Free AI Friend in Every Language',
+          short_name: 'Zevraq',
           description: 'Your Free AI Friend in Every Language. Runs 100% in your browser with zero servers or limits.',
           theme_color: '#4F46E5',
           background_color: '#FFFFFF',
