@@ -68,13 +68,13 @@ export default async function handler(req: IncomingMessage & { body?: any }, res
         : 'You are in Friend mode: be warm, supportive, smart, and helpful like a best friend.',
     ].join(' ');
 
-    const models = new Array('gemini-3.5-flash-lite', 'gemini-3.8-flash');
+  • const models = new Array('gemini-3.8-flash', 'gemini-3.5-flash-lite');
 
     let reply = '';
 
       for (let attempt = 0; attempt < 3 && !reply; attempt++) {
-      const modelName = models.at(attempt % models.length) || 'gemini-3.5-flash-lite';
-      const useLiveSearch = attempt < 2;
+    const modelName = attempt === 0 ? 'gemini-3.8-flash' : 'gemini-3.5-flash-lite';
+    const useLiveSearch = attempt === 0;
       try {
         const response = await ai.models.generateContent({
           model: modelName,
