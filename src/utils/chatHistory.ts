@@ -26,7 +26,7 @@ export function createWelcomeMessage(user: LocalUser | null, mode: PersonaMode =
   return {
     id: `welcome-${Date.now()}`,
     role: 'assistant',
-    text: `${greeting} I am Zenoa — your free AI friend in every language. Write or speak to me in বাংলা, हिन्दी, English, Banglish, Hinglish, or any language, or tap + to upload a photo for study help.`,
+    text: `${greeting} I am Zevraq — your free AI friend in every language. Write or speak to me in বাংলা, हिन्दी, English, Banglish, Hinglish, or any language, or tap + to upload a photo for study help.`,
     persona: mode,
     engine: 'instant',
     timestamp: Date.now(),
