@@ -60,7 +60,7 @@ const DEFAULT_CREATOR: CreatorProfile = {
   grade: 'Class 9 Student Developer',
   location: 'West Bengal, India',
   story:
-    'I built Zenoa as a Class 9 student because everyone deserves a kind, smart AI friend and study helper—without paywalls, confusing menus, or barriers.',
+    'I built Zevraq as a Class 9 student because everyone deserves a kind, smart AI friend and study helper—without paywalls, confusing menus, or barriers.',
 };
 
 interface SpeechRecognitionInstance {
@@ -843,7 +843,7 @@ export default function App() {
             <div className="min-w-0">
               <div className="flex items-center gap-1.5">
                 <span className="text-base sm:text-lg font-bold tracking-tight text-slate-900 dark:text-white truncate">
-                  Zenoa
+                  Zevraq
                 </span>
                 <span className="hidden xs:inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200/80 dark:border-emerald-800">
                   ● {liveClock}
@@ -952,7 +952,7 @@ export default function App() {
                       <div className="mt-2 pt-2 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between gap-2 text-[11px] text-slate-500 dark:text-slate-400">
                         <span className="inline-flex items-center gap-1">
                           <Sparkles className="w-3 h-3 text-indigo-500" />
-                          Zenoa AI
+                          Zevraq AI
                           {typeof msg.latencyMs === 'number' ? ` · ${msg.latencyMs}ms` : ''}
                         </span>
                         <button
@@ -1083,7 +1083,7 @@ export default function App() {
                     ? 'Ask about this photo...'
                     : persona === 'study'
                       ? 'Ask any study question in Bangla, Hindi, or English...'
-                      : 'Message Zenoa...'
+                      : 'Message Zevraq...'
                 }
                 className="flex-1 bg-transparent resize-none border-0 focus:outline-none text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 py-2 px-1 max-h-[130px]"
               />
