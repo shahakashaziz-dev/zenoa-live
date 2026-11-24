@@ -72,13 +72,16 @@ export default async function handler(req: IncomingMessage & { body?: any }, res
 
     let reply = '';
 
-    for (let attempt = 0; attempt < 3 && !reply; attempt++) {
-      const modelName = models.at(attempt % models.length) || 'gemini-3.8-flash';
+      for (let attempt = 0; attempt < 3 && !reply; attempt++) {
+      const modelName = models.at(attempt % models.length) || 'gemini-3.5-flash-lite';
+      const useLiveSearch = attempt < 2;
       try {
         const response = await ai.models.generateContent({
           model: modelName,
           contents: historyContents.concat(new Array({ role: 'user', parts })),
-          config: { systemInstruction },
+          config: useLiveSearch
+            ? { systemInstruction, tools: new Array({ googleSearch: {} }) }
+            : { systemInstruction },
         });
         if (response.text?.trim()) {
           reply = response.text.trim();
@@ -86,9 +89,10 @@ export default async function handler(req: IncomingMessage & { body?: any }, res
         }
       } catch (e: any) {
         console.error('TRY_ERR:', modelName, e?.message || e);
-        if (attempt < 2) await sleep(1500);
+        if (attempt < 2) await sleep(1000);
       }
     }
+
 
     if (!reply) {
       res.statusCode = 429;
